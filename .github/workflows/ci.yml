@@ -1,0 +1,304 @@
+# WebXR Environment - gate and deploy.
+#
+# ONE workflow gates and deploys. The build job runs the full gate once and
+# uploads the dists; the deploy jobs consume those artifacts through `needs`,
+# so nothing is installed, built or tested twice.
+#
+# Gate (every push and EVERY pull request - no branch filter, so a PR into
+# `development` is gated exactly like a PR into `main`):
+#   1. package builds  (tsc -> dist for core + three.js/IWSDK adapters)
+#   2. strict typecheck (all packages + the playground)
+#   3. vitest with coverage gates
+#   4. verify:pack      - packs, installs into a clean project and imports
+#   5. playground build (vite)
+#
+# Deploy:
+#   - production -> ONLY on push to `main` or a manual dispatch from `main`.
+#   - staging    -> ONLY on pull_request, into isolated `-test` projects.
+#     A PR can never touch production.
+#
+# The deploy steps need the Cloudflare secrets and skip automatically when they
+# are absent, which leaves this workflow as a pure build gate.
+#   - CLOUDFLARE_API_TOKEN   (token with "Cloudflare Pages: Edit")
+#   - CLOUDFLARE_ACCOUNT_ID
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - development
+  # No branch filter: run on every pull request, whatever its target branch.
+  pull_request:
+  # Allow required-check status to be reported through merge queues, if enabled.
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build, typecheck & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Nothing above this line exercises the built artifact - the tests and the
+      # typecheck both resolve the packages to `src`. This packs, installs into
+      # a clean project and imports: the gate that catches a package which
+      # builds green but ships broken.
+      - name: Verify the published artifact is consumable
+        run: npm run verify:pack -- --skip-build
+
+      - name: Build playground (static Vite bundle)
+        run: npm run build:playground
+
+      - name: Upload playground dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: environment-playground-dist
+          path: demos/playground/dist
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # PRODUCTION - push to main / manual dispatch only.
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: environment-playground-dist
+          path: demos/playground/dist
+
+      - name: Ensure the Cloudflare Pages project + production branch
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: webxr-environment
+          PROD_BRANCH: main
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects"
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${api}/${PROJECT}")"
+          if [ "$code" = "200" ]; then
+            echo "Project ${PROJECT} exists - pinning production branch to ${PROD_BRANCH}"
+            resp="$(curl -fsS -X PATCH "${api}/${PROJECT}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" \
+              --data "{\"production_branch\":\"${PROD_BRANCH}\"}")"
+          elif [ "$code" = "404" ]; then
+            echo "Project ${PROJECT} missing - creating with production branch ${PROD_BRANCH}"
+            resp="$(curl -fsS -X POST "${api}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" \
+              --data "{\"name\":\"${PROJECT}\",\"production_branch\":\"${PROD_BRANCH}\"}")"
+          else
+            echo "::error::Unexpected HTTP ${code} querying the Pages project."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$resp" | jq -r '.success')" != "true" ]; then
+            echo "::error::Cloudflare API call failed."
+            printf '%s\n' "$resp" | jq . 2>/dev/null || printf '%s\n' "$resp"
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages (production)
+        id: deploy
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: demos/playground
+          command: >-
+            pages deploy dist
+            --project-name=webxr-environment
+            --branch=${{ github.ref_name }}
+            --commit-dirty=true
+
+      - name: Publish the headset URL + QR
+        if: steps.deploy.outcome == 'success'
+        env:
+          APEX_URL: https://webxr-environment.pages.dev
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          set -uo pipefail
+          qrenc="$(jq -rn --arg u "$APEX_URL" '$u|@uri')"
+          {
+            echo "## Environment playground (PRODUCTION) - open on your headset"
+            echo ""
+            echo "Mouse works on desktop; use the VR button on a headset."
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| **Stable URL** | [\`${APEX_URL}\`](${APEX_URL}) |"
+            echo "| **This build** | [\`${DEPLOY_URL}\`](${DEPLOY_URL}) |"
+            echo ""
+            echo "![QR code](https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${qrenc})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- post-deploy verification -------------------------------------
+      # A build passing proves the code compiles, not that the page runs. A
+      # duplicate React, a bad asset path or a throw on mount all build green
+      # and white-screen in a browser. This loads what was ACTUALLY deployed
+      # and fails on uncaught exceptions, console errors, failed requests or an
+      # empty mount point.
+      - name: Setup Node.js for the smoke test
+        if: steps.deploy.outcome == 'success'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Only the browser driver, not the whole dependency tree - this job does
+      # not build anything. playwright-core drives the Chrome that the runner
+      # image already ships, so no browser is downloaded.
+      - name: Install the smoke-test driver
+        if: steps.deploy.outcome == 'success'
+        run: npm install --no-save --no-audit --no-fund playwright-core@1.61.1
+
+      - name: Smoke test the deployed site
+        if: steps.deploy.outcome == 'success'
+        run: |
+          node scripts/smoke-deploy.mjs \
+            "${{ steps.deploy.outputs.deployment-url }}" \
+            --mount "#scene-container"
+
+  # ---------------------------------------------------------------------------
+  # STAGING - pull_request only. Publishes to the ISOLATED test project.
+  # ---------------------------------------------------------------------------
+  deploy-staging:
+    needs: build-test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: environment-playground-dist
+          path: demos/playground/dist
+
+      - name: Ensure the staging Pages project (webxr-environment-test)
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: webxr-environment-test
+          PROD_BRANCH: staging
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects"
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${api}/${PROJECT}")"
+          if [ "$code" = "200" ]; then
+            resp="$(curl -fsS -X PATCH "${api}/${PROJECT}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" \
+              --data "{\"production_branch\":\"${PROD_BRANCH}\"}")"
+          elif [ "$code" = "404" ]; then
+            resp="$(curl -fsS -X POST "${api}" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json" \
+              --data "{\"name\":\"${PROJECT}\",\"production_branch\":\"${PROD_BRANCH}\"}")"
+          else
+            echo "::error::Unexpected HTTP ${code} querying the staging Pages project."
+            exit 1
+          fi
+          if [ "$(printf '%s' "$resp" | jq -r '.success')" != "true" ]; then
+            echo "::error::Cloudflare API call failed."
+            printf '%s\n' "$resp" | jq . 2>/dev/null || printf '%s\n' "$resp"
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages (staging)
+        id: deploy
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: demos/playground
+          command: >-
+            pages deploy dist
+            --project-name=webxr-environment-test
+            --branch=pr-${{ github.event.pull_request.number }}
+            --commit-dirty=true
+
+      - name: Publish the staging URL
+        if: steps.deploy.outcome == 'success'
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          set -uo pipefail
+          qrenc="$(jq -rn --arg u "$DEPLOY_URL" '$u|@uri')"
+          {
+            echo "## Environment playground (STAGING - this PR only)"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| **This build** | [\`${DEPLOY_URL}\`](${DEPLOY_URL}) |"
+            echo ""
+            echo "![QR code](https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${qrenc})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- post-deploy verification -------------------------------------
+      # A build passing proves the code compiles, not that the page runs. A
+      # duplicate React, a bad asset path or a throw on mount all build green
+      # and white-screen in a browser. This loads what was ACTUALLY deployed
+      # and fails on uncaught exceptions, console errors, failed requests or an
+      # empty mount point.
+      - name: Setup Node.js for the smoke test
+        if: steps.deploy.outcome == 'success'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      # Only the browser driver, not the whole dependency tree - this job does
+      # not build anything. playwright-core drives the Chrome that the runner
+      # image already ships, so no browser is downloaded.
+      - name: Install the smoke-test driver
+        if: steps.deploy.outcome == 'success'
+        run: npm install --no-save --no-audit --no-fund playwright-core@1.61.1
+
+      - name: Smoke test the deployed site
+        if: steps.deploy.outcome == 'success'
+        run: |
+          node scripts/smoke-deploy.mjs \
+            "${{ steps.deploy.outputs.deployment-url }}" \
+            --mount "#scene-container"
+

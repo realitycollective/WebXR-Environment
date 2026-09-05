@@ -1,0 +1,259 @@
+# Manual release workflow - publishes to npmjs.com under the @realitycollective
+# scope, matching com.realitycollective.service-framework.ts.
+#
+# Nothing here depends on a sibling repository's package, so unlike
+# WebXR-Interactions there is no cross-repository publish order to observe:
+# the three packages in this workspace are self-contained.
+#
+# Behaviour depends on the branch you dispatch from:
+#
+#   development  -> publishes every package under the `preview` dist-tag, then
+#                   bumps the preview counter (e.g. 0.1.1-preview.0 -> 0.1.1-preview.1)
+#                   and pushes the bump back to development so the next run never collides.
+#
+#   main         -> publishes every package under the `latest` dist-tag, creates the
+#                   GitHub release/tag, then merges main into development and re-seeds it
+#                   to the next patch preview (e.g. main 0.1.0 -> development 0.1.1-preview.0)
+#                   to keep the branches aligned.
+#
+# Any other branch is rejected.
+#
+# Defaults to a DRY RUN: build + test + verify:pack + pack + upload the tarballs
+# as artifacts, with no registry push, no tag, no release and no version bump.
+# Re-run with dryRun=false to release for real.
+#
+# NOTE: the development bump / re-seed steps push commits back to the repo using the
+# default GITHUB_TOKEN. If `main` or `development` is a protected branch that blocks
+# direct pushes, create a PAT with `contents: write`, add it as a secret (e.g. RELEASE_PAT),
+# and swap it into the `Checkout` step's `token:` input below.
+
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Dry run (build + pack + artifacts only - no publish, no tag, no version bump)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Validate branch
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "development" ]; then
+            echo "::error::Publish is only supported from 'main' (latest) or 'development' (preview). Got '$BRANCH'."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history is required to merge main into development.
+          fetch-depth: 0
+          # token: ${{ secrets.RELEASE_PAT }}   # uncomment if main/development are protected
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Verify the published artifact is consumable
+        run: npm run verify:pack -- --skip-build
+
+      - name: Resolve release context
+        id: ctx
+        run: |
+          set -euo pipefail
+          BRANCH="${{ github.ref_name }}"
+          CORE="$(node -p "require('./scripts/release.config.json').core")"
+          VERSION="$(node -p "require('./packages/${CORE}/package.json').version")"
+          case "$VERSION" in
+            *-*) IS_PRERELEASE=1 ;;
+            *)   IS_PRERELEASE=0 ;;
+          esac
+          if [ "$BRANCH" = "development" ]; then
+            if [ "$IS_PRERELEASE" != "1" ]; then
+              echo "::error::development must carry a prerelease version (found '$VERSION'). Run a main release first to seed the next preview."
+              exit 1
+            fi
+            TAG=preview
+          else
+            if [ "$IS_PRERELEASE" = "1" ]; then
+              echo "::error::main must carry a stable version (found prerelease '$VERSION')."
+              exit 1
+            fi
+            TAG=latest
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION from '$BRANCH' under dist-tag '$TAG'"
+
+      # LICENSE and CHANGELOG live once at the repository root and are copied into
+      # every package at pack time, so each tarball carries both.
+      - name: Stage LICENSE and CHANGELOG into the packages
+        run: |
+          set -euo pipefail
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            cp LICENSE "packages/$pkg/LICENSE"
+            # An explicit `if`, NOT `[ -f x ] && cp`. A false test makes the
+            # && list return 1; the loop is the last command in this step, so
+            # that becomes the step's exit status and the job fails even
+            # though nothing went wrong.
+            if [ -f CHANGELOG.md ]; then
+              cp CHANGELOG.md "packages/$pkg/CHANGELOG.md"
+            fi
+          done
+
+      - name: Pack (always - the artifacts are the receipt)
+        run: |
+          set -euo pipefail
+          mkdir -p dist-tarballs
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            name="$(node -p "require('./packages/$pkg/package.json').name")"
+            npm pack --workspace "$name" --pack-destination dist-tarballs
+          done
+          ls -l dist-tarballs
+
+      - name: Upload tarball artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-tarballs
+          path: dist-tarballs/*.tgz
+          if-no-files-found: error
+
+      - name: Publish packages
+        if: ${{ inputs.dryRun == false }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_key }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ctx.outputs.tag }}"
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            name="$(node -p "require('./packages/$pkg/package.json').name")"
+            version="$(node -p "require('./packages/$pkg/package.json').version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "Skipping $name@$version (already published)"
+              continue
+            fi
+            echo "Publishing $name@$version under dist-tag '$TAG'"
+            npm publish --workspace="$name" --access public --provenance --tag "$TAG"
+          done
+
+      # --- development: bump the preview counter so the next run can't collide ---
+      - name: Bump development preview version
+        if: ${{ inputs.dryRun == false && github.ref_name == 'development' }}
+        run: |
+          set -euo pipefail
+          NEW_VERSION="$(node scripts/set-version.mjs --bump)"
+          npm install --package-lock-only
+          git add -- package-lock.json README.md packages/*/package.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "chore(release): bump preview to v$NEW_VERSION [skip ci]"
+            git push origin "HEAD:development"
+            echo "development bumped to $NEW_VERSION"
+          fi
+
+      # --- main: cut the GitHub release, then realign development ---
+      - name: Create GitHub release
+        if: ${{ inputs.dryRun == false && github.ref_name == 'main' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="v${{ steps.ctx.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --title "$VERSION" --generate-notes dist-tarballs/*.tgz
+
+      - name: Refresh development from main and seed next preview
+        if: ${{ inputs.dryRun == false && github.ref_name == 'main' }}
+        run: |
+          set -euo pipefail
+          RELEASED="v${{ steps.ctx.outputs.version }}"
+          git fetch origin main
+          if git ls-remote --exit-code --heads origin development >/dev/null 2>&1; then
+            git fetch origin development
+            git checkout -B development origin/development
+            # Merge the released main into development. The version/lockfile/README always
+            # conflict (both branches touch them) - we take main's copy of those and re-stamp
+            # the next preview below. Any OTHER conflict is a real source divergence, so fail
+            # loudly rather than silently clobbering development work.
+            git merge --no-commit --no-ff origin/main || true
+            git checkout --theirs -- package-lock.json README.md packages/*/package.json 2>/dev/null || true
+            git add -- package-lock.json README.md packages/*/package.json 2>/dev/null || true
+            if [ -n "$(git ls-files -u)" ]; then
+              echo "::error::Unresolved conflicts merging main into development (resolve manually):"
+              git ls-files -u
+              exit 1
+            fi
+          else
+            echo "No development branch yet; creating it from main."
+            git checkout -B development origin/main
+          fi
+          # set-version --bump always changes the version, so there is always something to
+          # commit; mid-merge this commit also finalises the merge.
+          NEW_VERSION="$(node scripts/set-version.mjs --bump)"
+          npm install --package-lock-only
+          git add -- package-lock.json README.md packages/*/package.json
+          git commit -m "chore(release): seed development preview v$NEW_VERSION after $RELEASED [skip ci]"
+          git push origin "HEAD:development"
+          echo "development re-seeded to $NEW_VERSION"
+
+      - name: Summary
+        if: always()
+        env:
+          DRY: ${{ inputs.dryRun }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## ${{ github.event.repository.name }} publish"
+            echo ""
+            echo "| package | version | dist-tag |"
+            echo "| --- | --- | --- |"
+            for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+              name="$(node -p "require('./packages/$pkg/package.json').name")"
+              version="$(node -p "require('./packages/$pkg/package.json').version")"
+              echo "| \`$name\` | $version | ${{ steps.ctx.outputs.tag }} |"
+            done
+            echo ""
+            if [ "$DRY" = "true" ]; then
+              echo "**DRY RUN** - packed and verified but not published. Re-run with \`dryRun=false\` to publish to npmjs.com."
+            else
+              echo "Published to npmjs.com under dist-tag \`${{ steps.ctx.outputs.tag }}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

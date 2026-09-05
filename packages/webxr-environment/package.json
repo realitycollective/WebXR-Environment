@@ -1,0 +1,51 @@
+{
+  "name": "@realitycollective/webxr-environment",
+  "version": "0.1.0-preview.0",
+  "description": "Engine-free core of the Reality Collective WebXR Environment Extensions: the world around the player (sky, fog, ambient and key light) and the sound in it (cue registry, bus mix, retrigger policy, voices), described as plain data, interpolated by a host-ticked director and applied through engine ports. Pair with an engine adapter: threejs-environment or iwsdk-environment.",
+  "keywords": [
+    "realitycollective",
+    "webxr",
+    "xr",
+    "environment",
+    "skybox",
+    "fog",
+    "lighting",
+    "audio",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Environment.git",
+    "directory": "packages/webxr-environment"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Environment#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Environment/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "core": "webxr-environment",
+  "packages": [
+    "webxr-environment",
+    "threejs-environment",
+    "iwsdk-environment"
+  ],
+  "importCheck": [
+    "webxr-environment"
+  ],
+  "preid": "preview",
+  "legacyPeerDeps": true
+}
