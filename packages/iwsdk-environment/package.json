@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/iwsdk-environment",
-  "version": "0.1.0-preview.0",
+  "version": "0.1.0-preview.1",
   "description": "Meta IWSDK adapter for the Reality Collective WebXR Environment Extensions - drives IWSDK's own DomeGradient, light components, transform entities and AudioSource machinery from the engine-free @realitycollective/webxr-environment core, with a one-call registerEnvironment(world) setup and an ECS system that ticks the directors. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -35,7 +35,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-environment": "^0.1.0-preview.0"
+    "@realitycollective/webxr-environment": "^0.1.0-preview.1"
   },
   "peerDependencies": {
     "@iwsdk/core": ">=0.5.0 <0.6.0"
