@@ -27,7 +27,7 @@ describe("EnvironmentDirector", () => {
     // An adapter is entitled to assume the port describes the whole world, so
     // a scene carrying a leftover background from elsewhere gets cleared.
     const { port } = setup();
-    expect(port.calls.map((call) => call.slot)).toEqual(["sky", "fog", "ambient", "key"]);
+    expect(port.calls.map((call) => call.slot)).toEqual(["sky", "fog", "ambient", "key", "ibl"]);
     expect(port.calls.every((call) => call.value === null)).toBe(true);
   });
 

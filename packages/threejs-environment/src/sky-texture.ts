@@ -23,8 +23,18 @@
  * which is exactly the class of bug the pure function exists to pin.
  */
 import { DataTexture, EquirectangularReflectionMapping, LinearFilter, RGBAFormat, SRGBColorSpace } from "three";
-import type { SkyGradient } from "@realitycollective/webxr-environment";
+import type { IblGradient, Rgb, SkyGradient } from "@realitycollective/webxr-environment";
 import { clamp01, lerp } from "@realitycollective/webxr-environment";
+
+/**
+ * A gradient with or without a horizon stop, from either slot.
+ *
+ * The sky and the environment map take the same colours and differ only in
+ * what they are hung on, so one generator serves both. `horizon` and
+ * `exponent` shape the sky's ramp and have no meaning for an environment map,
+ * which is why they are optional here rather than duplicated.
+ */
+export type RampGradient = SkyGradient | IblGradient;
 
 /** Columns in the generated texture. Two, because a 1px-wide equirect filters badly. */
 export const SKY_TEXTURE_WIDTH = 2;
@@ -39,9 +49,9 @@ export const SKY_TEXTURE_HEIGHT = 64;
  * on each side of it, so a sunset can hold its orange near the ground and lose
  * it quickly above.
  */
-export function skyMix(gradient: SkyGradient, height: number): number {
-  const horizon = clamp01(gradient.horizon ?? 0.5);
-  const exponent = gradient.exponent ?? 1;
+export function skyMix(gradient: RampGradient, height: number): number {
+  const horizon = clamp01(("horizon" in gradient ? gradient.horizon : undefined) ?? 0.5);
+  const exponent = ("exponent" in gradient ? gradient.exponent : undefined) ?? 1;
   const t = clamp01(height);
   // Below the horizon the ramp runs bottom -> midpoint, above it midpoint ->
   // top. A horizon at exactly 0 is the one division by zero possible here (it
@@ -58,17 +68,55 @@ export function skyMix(gradient: SkyGradient, height: number): number {
 }
 
 /**
+ * The colour at a height up the sphere.
+ *
+ * `intensity` is NOT applied here. three.js has `backgroundIntensity` and
+ * `environmentIntensity` on the scene, and multiplying bytes in an 8-bit
+ * texture would clip everything brighter than white while the scene property
+ * does the same job in floating point.
+ *
+ * With no `equator` this is the two-stop ramp the package started with. With
+ * one it is two ramps meeting at the horizon, which is what IWSDK's dome has
+ * always been and what an app needs to put a bright band at eye level. The
+ * `exponent` shaping applies to the position within whichever half we are in,
+ * so a sunset can hold its colour near the ground on both engines.
+ */
+export function gradientColourAt(gradient: RampGradient, height: number): Rgb {
+  const equator = gradient.equator;
+  if (equator === undefined) {
+    const t = skyMix(gradient, height);
+    return [
+      lerp(gradient.bottom[0], gradient.top[0], t),
+      lerp(gradient.bottom[1], gradient.top[1], t),
+      lerp(gradient.bottom[2], gradient.top[2], t),
+    ];
+  }
+  const horizon = clamp01(("horizon" in gradient ? gradient.horizon : undefined) ?? 0.5);
+  const t = clamp01(height);
+  const exponent = ("exponent" in gradient ? gradient.exponent : undefined) ?? 1;
+  const below = t <= horizon;
+  // At a horizon of 0 every sample is at or above it, so the division below is
+  // never reached with a zero denominator; the same holds at 1 for the other
+  // half, because `t` is clamped.
+  const raw = below ? (horizon <= 0 ? 1 : t / horizon) : (t - horizon) / (1 - horizon);
+  const local = exponent === 1 ? raw : Math.pow(raw, exponent);
+  const from = below ? gradient.bottom : equator;
+  const to = below ? equator : gradient.top;
+  return [lerp(from[0], to[0], local), lerp(from[1], to[1], local), lerp(from[2], to[2], local)];
+}
+
+/**
  * RGBA bytes for the gradient, nadir row first. Pure - no three.js, no DOM.
  */
-export function gradientPixels(gradient: SkyGradient, height = SKY_TEXTURE_HEIGHT): Uint8Array {
+export function gradientPixels(gradient: RampGradient, height = SKY_TEXTURE_HEIGHT): Uint8Array {
   const pixels = new Uint8Array(SKY_TEXTURE_WIDTH * height * 4);
   for (let row = 0; row < height; row += 1) {
     // Sample at the centre of the row, so the extreme rows are not pure
     // `bottom` / `top` and the ramp stays symmetric.
-    const t = skyMix(gradient, (row + 0.5) / height);
-    const r = Math.round(clamp01(lerp(gradient.bottom[0], gradient.top[0], t)) * 255);
-    const g = Math.round(clamp01(lerp(gradient.bottom[1], gradient.top[1], t)) * 255);
-    const b = Math.round(clamp01(lerp(gradient.bottom[2], gradient.top[2], t)) * 255);
+    const colour = gradientColourAt(gradient, (row + 0.5) / height);
+    const r = Math.round(clamp01(colour[0]) * 255);
+    const g = Math.round(clamp01(colour[1]) * 255);
+    const b = Math.round(clamp01(colour[2]) * 255);
     for (let column = 0; column < SKY_TEXTURE_WIDTH; column += 1) {
       const offset = (row * SKY_TEXTURE_WIDTH + column) * 4;
       pixels[offset] = r;
@@ -81,7 +129,7 @@ export function gradientPixels(gradient: SkyGradient, height = SKY_TEXTURE_HEIGH
 }
 
 /** Build the equirectangular background texture for a gradient sky. */
-export function createSkyTexture(gradient: SkyGradient, height = SKY_TEXTURE_HEIGHT): DataTexture {
+export function createSkyTexture(gradient: RampGradient, height = SKY_TEXTURE_HEIGHT): DataTexture {
   const texture = new DataTexture(
     gradientPixels(gradient, height),
     SKY_TEXTURE_WIDTH,

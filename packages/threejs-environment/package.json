@@ -41,7 +41,7 @@
     "three": ">=0.170.0"
   },
   "devDependencies": {
-    "three": "npm:super-three@0.181.0",
+    "three": "npm:super-three@0.185.0",
     "@types/three": "*"
   },
   "repository": {

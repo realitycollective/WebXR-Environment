@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Group, PositionalAudio, Scene } from "three";
+import { Group, PositionalAudio, Scene, Vector3 } from "three";
 import type { AudioCue, AudioVoiceRequest } from "@realitycollective/threejs-environment";
 import { ThreeAudioPort, createThreeAudio } from "@realitycollective/threejs-environment";
 import { createTestListener, fakeBuffer } from "./helpers.js";
@@ -168,6 +168,68 @@ describe("ThreeAudioPort", () => {
 
     port.stop(1);
     expect(scene.children).not.toContain(holder);
+  });
+
+  it("gives a positional voice the cue's own fall-off", async () => {
+    const { port, loader, scene } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    port.start(
+      request({
+        at: [0, 0, 0],
+        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+      }),
+    );
+    const holder = scene.children.find((child) => child.name.startsWith("webxr-environment:voice"));
+    const audio = holder?.children[0] as PositionalAudio;
+    expect(audio.getRefDistance()).toBe(4);
+    expect(audio.getRolloffFactor()).toBe(2);
+    expect(audio.getMaxDistance()).toBe(30);
+    expect(audio.getDistanceModel()).toBe("linear");
+  });
+
+  it("points a directional voice the way the app said, in the host's own units", async () => {
+    const { port, loader, scene } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    port.start(
+      request({
+        at: [0, 0, 0],
+        // A quarter-turn cone facing straight down.
+        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        facing: [0, -1, 0],
+      }),
+    );
+    const holder = scene.children.find((child) => child.name.startsWith("webxr-environment:voice"));
+    const audio = holder?.children[0] as PositionalAudio;
+
+    // Radians in the contract, degrees at the panner.
+    expect(audio.panner.coneInnerAngle).toBe(90);
+    expect(audio.panner.coneOuterAngle).toBe(180);
+    expect(audio.panner.coneOuterGain).toBe(0.25);
+
+    // three.js points a sound along +Z, so the holder is turned to put +Z
+    // where the app said the sound travels.
+    const forward = new Vector3(0, 0, 1).applyQuaternion(holder!.quaternion);
+    expect(forward.x).toBeCloseTo(0, 5);
+    expect(forward.y).toBeCloseTo(-1, 5);
+    expect(forward.z).toBeCloseTo(0, 5);
+  });
+
+  it("ignores a facing that points nowhere", async () => {
+    const { port, loader, scene } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    port.start(request({ at: [0, 0, 0], facing: [0, 0, 0] }));
+    const holder = scene.children.find((child) => child.name.startsWith("webxr-environment:voice"));
+    // A zero-length direction would make a NaN quaternion and lose the sound.
+    expect(holder?.quaternion.w).toBe(1);
   });
 
   it("honours a cue marked positional even with no position given", async () => {

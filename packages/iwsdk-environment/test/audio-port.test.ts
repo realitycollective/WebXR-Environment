@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AudioSource, AudioUtils, PlaybackMode, Transform, type Entity } from "@iwsdk/core";
+import {
+  AudioSource,
+  AudioUtils,
+  PlaybackMode,
+  Quaternion,
+  Transform,
+  Vector3,
+  type Entity,
+} from "@iwsdk/core";
 import type { AudioCue, AudioVoiceRequest } from "@realitycollective/iwsdk-environment";
 import { IWSDKAudioPort } from "@realitycollective/iwsdk-environment";
 import { asWorld, createFakeEntity, createFakeWorld } from "./helpers.js";
@@ -200,5 +208,73 @@ describe("IWSDKAudioPort", () => {
 
     port.update(16);
     port.dispose();
+  });
+});
+
+describe("spatial attenuation", () => {
+  it("writes the cue's fall-off onto the AudioSource, and nothing it did not name", () => {
+    stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world));
+
+    port.start(
+      request({
+        at: [0, 0, 0],
+        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+      }),
+    );
+    const withSpatial = world.created.at(-1);
+    expect(withSpatial?.components.get(AudioSource)?.["refDistance"]).toBe(4);
+    expect(withSpatial?.components.get(AudioSource)?.["rolloffFactor"]).toBe(2);
+    expect(withSpatial?.components.get(AudioSource)?.["maxDistance"]).toBe(30);
+    expect(withSpatial?.components.get(AudioSource)?.["distanceModel"]).toBe("linear");
+
+    port.start(request({ voiceId: 2, at: [0, 0, 0], spatial: { model: "exponential" } }));
+    const sparse = world.created.at(-1);
+    expect(sparse?.components.get(AudioSource)?.["distanceModel"]).toBe("exponential");
+    expect(sparse?.components.get(AudioSource)).not.toHaveProperty("refDistance");
+
+    port.start(request({ voiceId: 3, at: [0, 0, 0], spatial: { model: "inverse" } }));
+    expect(world.created.at(-1)?.components.get(AudioSource)?.["distanceModel"]).toBe("inverse");
+  });
+
+  it("writes a cone in degrees and turns the entity to face where it points", () => {
+    stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world));
+
+    port.start(
+      request({
+        at: [0, 0, 0],
+        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        facing: [0, 0, -1],
+      }),
+    );
+    const entity = world.created.at(-1);
+    const source = entity?.components.get(AudioSource);
+    expect(source?.["coneInnerAngle"]).toBe(90);
+    expect(source?.["coneOuterAngle"]).toBe(180);
+    expect(source?.["coneOuterGain"]).toBe(0.25);
+
+    // IWSDK hands the entity transform to the same three.js positional audio,
+    // so +Z has to end up pointing the way the sound travels. The rotation is
+    // asserted by its EFFECT: a quaternion and its negation are the same turn,
+    // and pinning one of the two spellings would be a test of three.js.
+    const orientation = entity?.getVectorView(Transform, "orientation") ?? [];
+    const turn = new Quaternion(orientation[0], orientation[1], orientation[2], orientation[3]);
+    const forward = new Vector3(0, 0, 1).applyQuaternion(turn);
+    expect(forward.x).toBeCloseTo(0, 5);
+    expect(forward.y).toBeCloseTo(0, 5);
+    expect(forward.z).toBeCloseTo(-1, 5);
+  });
+
+  it("leaves a voice unturned when it faces nowhere", () => {
+    stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world));
+    port.start(request({ at: [0, 0, 0], facing: [0, 0, 0] }));
+    const orientation = world.created.at(-1)?.getVectorView(Transform, "orientation");
+    // Untouched: a zero-length direction is not a direction.
+    expect(Array.from(orientation ?? [])).toEqual([0, 0, 0, 0]);
   });
 });

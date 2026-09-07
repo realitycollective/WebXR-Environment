@@ -24,6 +24,7 @@
       #hud label { display: block; margin-top: 6px; opacity: 0.85; }
       #hud input[type="range"] { width: 140px; vertical-align: middle; }
       #state { margin-top: 10px; opacity: 0.6; font-variant-numeric: tabular-nums; }
+      #sensing { margin-top: 4px; opacity: 0.6; }
     </style>
   </head>
   <body>
@@ -33,11 +34,13 @@
       <div id="presets" class="row"></div>
       <div class="row">
         <button id="passthrough">Toggle passthrough</button>
+        <button id="occlusion">Toggle occlusion</button>
         <button id="cue">Play cue</button>
       </div>
       <label>Master gain <input id="master" type="range" min="0" max="1" step="0.01" value="1" /></label>
       <label>Ambience bus <input id="ambience" type="range" min="0" max="1" step="0.01" value="0.6" /></label>
       <div id="state"></div>
+      <div id="sensing"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

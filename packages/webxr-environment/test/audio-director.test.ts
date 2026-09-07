@@ -329,3 +329,48 @@ describe("AudioDirector", () => {
     });
   });
 });
+
+describe("spatial attenuation", () => {
+  it("resolves the cue's fall-off onto the request, and null when it has none", () => {
+    const port = new RecordingAudioPort();
+    const director = new AudioDirector(port, {
+      cues: [
+        { id: "far", src: "far.ogg", positional: true, spatial: { refDistance: 5, model: "linear" } },
+        { id: "near", src: "near.ogg", positional: true },
+      ],
+    });
+
+    director.play("far");
+    director.play("near");
+
+    expect(port.started[0]?.request.spatial).toEqual({ refDistance: 5, model: "linear" });
+    expect(port.started[1]?.request.spatial).toBeNull();
+  });
+
+  it("keeps the cone with the cue and the facing with the play", () => {
+    const port = new RecordingAudioPort();
+    const director = new AudioDirector(port, {
+      cues: [
+        {
+          id: "tannoy",
+          src: "tannoy.ogg",
+          positional: true,
+          // What KIND of thing is making the noise: a horn, not an orb.
+          spatial: { cone: { inner: Math.PI / 4, outer: Math.PI / 2, outsideGain: 0.1 } },
+        },
+      ],
+    });
+
+    // Which way THIS one is turned is per play, like its position.
+    director.play("tannoy", { at: [1, 0, 0], facing: [0, 0, -1] });
+    director.play("tannoy", { at: [2, 0, 0] });
+
+    expect(port.started[0]?.request.spatial?.cone).toEqual({
+      inner: Math.PI / 4,
+      outer: Math.PI / 2,
+      outsideGain: 0.1,
+    });
+    expect(port.started[0]?.request.facing).toEqual([0, 0, -1]);
+    expect(port.started[1]?.request.facing).toBeNull();
+  });
+});

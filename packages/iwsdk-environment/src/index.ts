@@ -19,6 +19,8 @@ export type { IWSDKEnvironmentPortOptions } from "./environment-port.js";
 export { IWSDKEnvironmentPort } from "./environment-port.js";
 export type { IWSDKAudioPortOptions } from "./audio-port.js";
 export { IWSDKAudioPort } from "./audio-port.js";
+export type { IWSDKWorldSensingPortOptions } from "./world-sensing-port.js";
+export { IWSDKWorldSensingPort } from "./world-sensing-port.js";
 
 export * from "@realitycollective/webxr-environment";
 

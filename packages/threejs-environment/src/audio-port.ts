@@ -20,7 +20,7 @@
  * session (or from the Enter-VR button) - nothing here can do it for you, and
  * a suspended context makes every voice silently succeed.
  */
-import { Audio, AudioListener, AudioLoader, Object3D, PositionalAudio } from "three";
+import { Audio, AudioListener, AudioLoader, Object3D, PositionalAudio, Vector3 } from "three";
 import type { AudioCue, AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
 
 export interface ThreeAudioPortOptions {
@@ -35,6 +35,15 @@ export interface ThreeAudioPortOptions {
   readonly loader?: Pick<AudioLoader, "loadAsync">;
   /** Reference distance for positional voices, metres. Default 1. */
   readonly refDistance?: number;
+}
+
+/** Web Audio points a source along +Z, and three.js follows it. */
+const AUDIO_FORWARD = new Vector3(0, 0, 1);
+const TEMP_FACING = new Vector3();
+
+/** Radians in the contract; degrees at every host, because Web Audio wants them. */
+function toDegrees(radians: number): number {
+  return (radians * 180) / Math.PI;
 }
 
 /**
@@ -162,8 +171,35 @@ export class ThreeAudioPort implements AudioPort {
 
     if (positional) {
       const spatial = new PositionalAudio(this.#listener);
-      spatial.setRefDistance(this.#refDistance);
-      holder = new Object3D();
+      const voiceHolder = new Object3D();
+      // The port's own reference distance is the FLOOR, not the law: a cue
+      // that describes how far it carries beats one number applied to every
+      // sound in the title, which is what this adapter used to do.
+      const attenuation = request.spatial;
+      spatial.setRefDistance(attenuation?.refDistance ?? this.#refDistance);
+      if (attenuation?.rolloffFactor !== undefined) {
+        spatial.setRolloffFactor(attenuation.rolloffFactor);
+      }
+      if (attenuation?.maxDistance !== undefined) spatial.setMaxDistance(attenuation.maxDistance);
+      if (attenuation?.model !== undefined) spatial.setDistanceModel(attenuation.model);
+      // Radians in the contract, degrees at the panner. three.js orients a
+      // positional sound along its own +Z, so the holder is turned to point
+      // that axis the way the app said the sound travels.
+      const cone = attenuation?.cone;
+      if (cone !== undefined) {
+        spatial.setDirectionalCone(toDegrees(cone.inner), toDegrees(cone.outer), cone.outsideGain);
+      }
+      // `?? null` rather than a bare null check: a request built by hand - a
+      // test, or an app driving the port directly - carries `undefined` here,
+      // and a NaN quaternion is a silent way to lose a sound.
+      const towards = request.facing ?? null;
+      if (towards !== null) {
+        const facing = TEMP_FACING.set(towards[0], towards[1], towards[2]);
+        if (facing.lengthSq() > 0) {
+          voiceHolder.quaternion.setFromUnitVectors(AUDIO_FORWARD, facing.normalize());
+        }
+      }
+      holder = voiceHolder;
       holder.name = `webxr-environment:voice-${request.voiceId}`;
       if (request.at !== null) holder.position.set(request.at[0], request.at[1], request.at[2]);
       holder.add(spatial);

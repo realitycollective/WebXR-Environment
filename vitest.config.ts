@@ -10,6 +10,7 @@ export default defineConfig({
       "@realitycollective/webxr-environment": pkg("webxr-environment"),
       "@realitycollective/threejs-environment": pkg("threejs-environment"),
       "@realitycollective/iwsdk-environment": pkg("iwsdk-environment"),
+      "@realitycollective/xrblocks-environment": pkg("xrblocks-environment"),
     },
   },
   test: {
@@ -34,6 +35,7 @@ export default defineConfig({
         "packages/webxr-environment/src/index.ts",
         "packages/threejs-environment/src/index.ts",
         "packages/iwsdk-environment/src/index.ts",
+        "packages/xrblocks-environment/src/index.ts",
       ],
       // Anti-regression ratchets, one per package, each at the floor that
       // package actually measures today. Per-package rather than one global
@@ -64,6 +66,16 @@ export default defineConfig({
         "packages/threejs-environment/src/**": {
           lines: 100,
           branches: 96,
+          functions: 100,
+          statements: 100,
+        },
+        // The XR Blocks adapter is the three.js one plus two sensors, and XR
+        // Blocks itself is never imported - its depth and lighting managers
+        // are structural, so both sensing paths are driven by object literals
+        // here exactly as they would be by the real thing.
+        "packages/xrblocks-environment/src/**": {
+          lines: 100,
+          branches: 97,
           functions: 100,
           statements: 100,
         },

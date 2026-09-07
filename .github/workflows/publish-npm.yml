@@ -3,7 +3,7 @@
 #
 # Nothing here depends on a sibling repository's package, so unlike
 # WebXR-Interactions there is no cross-repository publish order to observe:
-# the three packages in this workspace are self-contained.
+# the four packages in this workspace are self-contained.
 #
 # Behaviour depends on the branch you dispatch from:
 #

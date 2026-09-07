@@ -3,7 +3,8 @@
   "packages": [
     "webxr-environment",
     "threejs-environment",
-    "iwsdk-environment"
+    "iwsdk-environment",
+    "xrblocks-environment"
   ],
   "importCheck": [
     "webxr-environment"

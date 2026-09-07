@@ -7,8 +7,17 @@
  * maker: the core has already resolved the interpolation, the mix and the
  * retrigger policy by the time a port method is called.
  */
-import type { AmbientLightSpec, FogSpec, KeyLightSpec, SkySpec } from "./environment.js";
+import type {
+  AmbientLightSpec,
+  FogSpec,
+  IblSpec,
+  KeyLightSpec,
+  SkySpec,
+} from "./environment.js";
 import type { AudioCue, AudioVoiceRequest } from "./audio.js";
+import type { OcclusionSpec } from "./occlusion.js";
+import type { ResolvedLightEstimation } from "./light-estimation.js";
+import type { EnvironmentPortHost } from "./sensing.js";
 
 /**
  * Applies an environment to a scene.
@@ -24,6 +33,55 @@ export interface EnvironmentPort {
   applyFog(fog: FogSpec | null): void;
   applyAmbient(light: AmbientLightSpec | null): void;
   applyKeyLight(light: KeyLightSpec | null): void;
+  /**
+   * The environment map. Required like the other four, because a slot the
+   * director flushes and a port may quietly not have is a slot that goes
+   * missing on one engine and nowhere else.
+   */
+  applyIbl(ibl: IblSpec | null): void;
+
+  /**
+   * Turn real-world depth occlusion on, or off with `null`.
+   *
+   * OPTIONAL, because a host without depth is a host that has nothing to
+   * implement here - and because the director only calls it while passthrough
+   * is on, a port that never sees it is not necessarily a port on a device
+   * without depth. Report through {@link observe} rather than throwing.
+   */
+  applyOcclusion?(spec: OcclusionSpec | null): void;
+
+  /**
+   * Start or stop light estimation, with every default already resolved.
+   *
+   * A port that implements this reports what happens through {@link observe}:
+   * `pending` once the runtime accepted the request, `active` with each
+   * estimate, `unavailable` when the session did not grant it. A port that
+   * does not implement it should report `unsupported` from `observe`, so the
+   * absence is visible instead of silent.
+   */
+  applyLightEstimation?(estimation: ResolvedLightEstimation | null): void;
+
+  /**
+   * Hand the port the object it talks back through.
+   *
+   * Called once, at construction, before anything is applied. The returned
+   * function is called on dispose. This is the ONLY inbound path: see
+   * `sensing.ts` for why there is one and why it carries what it does.
+   */
+  observe?(host: EnvironmentPortHost): (() => void) | void;
+
+  /**
+   * Called from `EnvironmentDirector.update`, before any transition advances.
+   *
+   * Only a port that has to POLL its host needs this, and both of the ones
+   * that do are sensor-backed: three.js reports depth sensing through a
+   * renderer flag that flips some frames after the session starts, and a light
+   * estimate has to be read out of the current `XRFrame` or not at all.
+   * Neither host pushes those, so without a tick they would need a loop of
+   * their own - which is the thing this package refuses to own.
+   */
+  update?(deltaMs: number): void;
+
   /** Release anything the port created. Optional. */
   dispose?(): void;
 }

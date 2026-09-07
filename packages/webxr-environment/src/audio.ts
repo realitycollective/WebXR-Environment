@@ -30,7 +30,7 @@ export type AudioBus = string;
  * `master` is NOT in here: it is a separate scalar over all buses, so that
  * "duck everything" and "turn the music down" never fight over one number.
  */
-export const DEFAULT_BUSES = ["music", "sfx", "voice", "ambience"] as const;
+export const DEFAULT_BUSES = ["music", "sfx", "voice", "ambience", "ui"] as const;
 
 /** The bus a cue lands on when it does not name one. */
 export const DEFAULT_BUS = "sfx";
@@ -43,6 +43,64 @@ export type CuePolicy =
   | "restart"
   /** Drop the request. */
   | "ignore";
+
+/**
+ * How a positional voice gets quieter with distance.
+ *
+ * Every field is something all three hosts already expose per source - three's
+ * `PositionalAudio` has `setRefDistance`, `setRolloffFactor`, `setMaxDistance`
+ * and `setDistanceModel`; IWSDK's `AudioSource` has the same four, one of them
+ * as a `DistanceModel` enum; XR Blocks' spatial audio has its own equivalents.
+ * Leaving them out of the contract does not make the stack portable, it makes
+ * every adapter apply one constant to every sound, which is the opposite of
+ * the job: a footstep and a waterfall do not fall off at the same rate.
+ *
+ * Omitted fields are the host's own defaults, which is why there is no
+ * "resolved" form of this. The core has no opinion about how far a sound
+ * carries.
+ */
+export interface AudioSpatial {
+  /** Metres at which the sound is at full volume. */
+  readonly refDistance?: number;
+  /** How quickly it falls off past that. Higher is faster. */
+  readonly rolloffFactor?: number;
+  /** Metres past which it gets no quieter. */
+  readonly maxDistance?: number;
+  /** The attenuation curve. Web Audio's three, which every host maps to. */
+  readonly model?: "linear" | "inverse" | "exponential";
+  /**
+   * Which way the sound points, and how narrowly.
+   *
+   * Distance says how quiet a sound gets as you walk away; this says how quiet
+   * it gets as you walk AROUND it. A television, a PA horn and a person
+   * talking are all quieter behind than in front, and without this every one
+   * of them plays as a glowing orb of sound.
+   *
+   * The cone is a property of the CUE, because it describes what kind of thing
+   * is making the noise. Which way that particular one is turned is a property
+   * of the play - see `PlayOptions.facing`.
+   */
+  readonly cone?: AudioCone;
+}
+
+/**
+ * A directional sound, in this package's own terms.
+ *
+ * Angles are RADIANS, like every other angle here, and are the FULL width of
+ * the cone rather than a half-angle. Both current hosts want degrees, because
+ * both are wrapping the same Web Audio panner underneath - IWSDK reaches it
+ * through a component, three.js through `setDirectionalCone` - and each
+ * adapter converts. That is the whole point of naming it here: the app says
+ * one thing, and what the platform happens to want is the adapter's problem.
+ */
+export interface AudioCone {
+  /** Full width of the cone inside which the sound is at full volume. */
+  readonly inner: number;
+  /** Full width of the cone by which it has faded to `outsideGain`. */
+  readonly outer: number;
+  /** How loud it still is outside the outer cone, 0..1. */
+  readonly outsideGain: number;
+}
 
 /** A sound the app knows how to make. Registered once, played by id. */
 export interface AudioCue {
@@ -58,6 +116,8 @@ export interface AudioCue {
   readonly loop?: boolean;
   /** Play from a point in the world rather than from the listener. */
   readonly positional?: boolean;
+  /** How this cue falls off with distance. Positional cues only. */
+  readonly spatial?: AudioSpatial;
   /** Retrigger policy. Default `"overlap"`. */
   readonly policy?: CuePolicy;
   /**
@@ -80,6 +140,17 @@ export interface PlayOptions {
   readonly gain?: number;
   /** Where in the world it comes from. Implies positional playback. */
   readonly at?: Vec3;
+  /**
+   * Which way it faces: the direction the sound TRAVELS, as `[x, y, z]`.
+   *
+   * The same convention as `KeyLightSpec.direction`, and for the same reason -
+   * one rule for direction across the package, and the hosts' own ideas of
+   * forward (three.js audio points along +Z) absorbed by the adapters.
+   *
+   * Only meaningful with a cue that has a `cone`. A zero-length vector, or
+   * none at all, leaves the sound pointing wherever the host puts it.
+   */
+  readonly facing?: Vec3;
   /** Override the cue's `loop`. */
   readonly loop?: boolean;
 }
@@ -104,6 +175,13 @@ export interface AudioVoiceRequest {
   readonly loop: boolean;
   /** World position, or null for playback from the listener. */
   readonly at: Vec3 | null;
+  /**
+   * The cue's attenuation, or null when it named none and the port should use
+   * its own defaults. Resolved here so a port never reads the cue for policy.
+   */
+  readonly spatial: AudioSpatial | null;
+  /** Which way this voice faces, or null. See `PlayOptions.facing`. */
+  readonly facing: Vec3 | null;
   /**
    * The port calls this ONCE when the voice stops of its own accord, so the
    * director can retire it. A port that fires and forgets a one-shot should

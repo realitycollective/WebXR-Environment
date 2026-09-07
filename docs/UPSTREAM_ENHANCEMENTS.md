@@ -66,9 +66,29 @@ service-framework exports `EnvironmentDescriptor` / `createBrowserEnvironment()`
 
 **Request:** a sentence in each package's README naming the other, so nobody spends an afternoon on it. Renaming either is not worth a breaking change.
 
----
+### 2.5 A session cannot ask for the depth sensing it is going to use - **enhancement**
 
----
+`SessionRequestOptions` now carries `requiredFeatures` and `optionalFeatures` (item 2.3, shipped), which is enough to ask for `depth-sensing`. It is not enough to ask for depth sensing that is USABLE.
+
+WebXR's depth-sensing feature takes a whole init dictionary of its own, not just a feature string:
+
+```ts
+navigator.xr.requestSession("immersive-ar", {
+  requiredFeatures: ["depth-sensing"],
+  depthSensing: {
+    usagePreference: ["gpu-optimized"],
+    dataFormatPreference: ["float32", "luminance-alpha"],
+    depthTypeRequest: ["raw"],       // added to the draft in 2026
+    matchDepthView: true,
+  },
+});
+```
+
+That matters here because three.js's built-in occlusion runs ONLY when `session.depthUsage === "gpu-optimized"`. A session that asked for `depth-sensing` and got the cpu-optimized form is a session where occlusion silently does nothing, and there is no way to re-request it without ending the session.
+
+**Request:** an optional pass-through for feature init dictionaries on `SessionRequestOptions` - the whole `XRSessionInit` extras rather than a depth-specific field, so `domOverlay`, `hitTestOptions` and whatever comes next need no further changes.
+
+**Impact if not done:** an app on this stack asks for depth through the platform layer and then cannot say which kind, so `OcclusionSpec.source` is a preference the adapter can only report as ignored. WebXR-Environment reports it rather than hiding it, which is the workaround, not a fix.
 
 ## 3. WebXR-Interactions
 
@@ -130,6 +150,28 @@ This is not a hypothetical ask: **WebXR-Input already does it.** `@realitycollec
 
 ---
 
+## 6. Meta IWSDK
+
+Not a sibling family, and not ours to fix - but the two gaps below are the reason two features in this repository read differently on IWSDK than on the other hosts, and both are worth filing upstream.
+
+### 6.1 No light estimation - **feature request**
+
+`@iwsdk/core` 0.5.3 has nothing for WebXR light estimation: no probe request, no session hook, and zero hits for it in the typings. The other two hosts both have it - three.js ships `XREstimatedLight`, and XR Blocks wraps that same class in its `Lighting` module - so an app that lights its content from the real room works everywhere except the host most likely to be running on a passthrough headset.
+
+The IWSDK adapter reports `lightEstimation: unsupported` with that sentence in the detail, so it is visible rather than silent.
+
+**Request:** an estimated-lighting source in IWSDK's lighting module, feeding its existing ambient and directional light components.
+
+### 6.2 Occlusion is per entity, with no global mode - **enhancement**
+
+`DepthSensingSystem` turns depth sensing on, but occlusion applies only to entities carrying `DepthOccludable`, which patches every material under the entity through `onBeforeCompile`. There is no "occlude everything that depth-tests", which is what both other hosts do by writing depth once before the scene draws.
+
+The consequence is in this repository's API: `OcclusionSpec.scope: "all"` needs the app to say which entities it means, because walking a scene graph looking for meshes would be this package guessing at content it does not own.
+
+**Request:** a global occlusion mode on `DepthSensingSystem`, equivalent to a depth prime pass, so `scope: "all"` needs no entity list.
+
+**Impact if not done:** none on correctness. The adapter takes an `occludables` option and says plainly when it has not been given one.
+
 ## 7. Summary
 
 | # | Package | Item | Kind |
@@ -144,6 +186,11 @@ This is not a hypothetical ask: **WebXR-Input already does it.** `@realitycollec
 | 4.1 | WebXR-UIExtensions | Handover §3.6 HUD example is stale | Documentation |
 | 3.1b | WebXR-Input | Contract case for the converse presence implication | Test coverage |
 | 4.2 | service-framework / UIExtensions | Ship the named contracts as webxr-input already does | Scope |
+| 2.5 | service-framework | Session request cannot carry feature init dictionaries (`depthSensing`) | Enhancement |
+| 6.1 | Meta IWSDK | No WebXR light estimation | Feature request |
+| 6.2 | Meta IWSDK | Occlusion is per entity, with no global mode | Enhancement |
+
+Items 6.1 and 6.2 are requests to Meta rather than to a sibling family, and are listed here because they are the reason two capabilities behave differently on IWSDK.
 
 Nothing in this list blocks WebXR-Environment. Every item is either worked around in a way that is documented at the workaround, or has no live impact yet.
 

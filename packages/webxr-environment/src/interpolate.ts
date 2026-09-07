@@ -24,17 +24,34 @@ import type {
   FogExponential,
   FogLinear,
   FogSpec,
+  IblEstimated,
+  IblGradient,
+  IblRoom,
+  IblSpec,
+  IblTexture,
   KeyLightSpec,
   ResolvedEnvironment,
+  Rgb,
   SkyGradient,
   SkySolid,
   SkySpec,
+  SkyTexture,
   Vec3,
 } from "./environment.js";
 import { lerp, lerpRgb } from "./math.js";
 
 function lerpVec3(from: Vec3, to: Vec3, t: number): Vec3 {
   return [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)];
+}
+
+/**
+ * An optional colour interpolates only when BOTH ends have one. A gradient
+ * that gains or loses its horizon stop takes the target's answer at once,
+ * because there is no midpoint between "this ramp has a third colour" and
+ * "this ramp is derived from two".
+ */
+function lerpOptionalRgb(from: Rgb | undefined, to: Rgb | undefined, t: number): Rgb | undefined {
+  return from === undefined || to === undefined ? to : lerpRgb(from, to, t);
 }
 
 function lerpSky(from: SkySpec | null, to: SkySpec | null, t: number): SkySpec | null {
@@ -45,13 +62,64 @@ function lerpSky(from: SkySpec | null, to: SkySpec | null, t: number): SkySpec |
   if (to.kind === "solid") {
     return { kind: "solid", colour: lerpRgb((from as SkySolid).colour, to.colour, t) };
   }
+  if (to.kind === "texture") {
+    const texture = from as SkyTexture;
+    // Two different images cannot be blended without a compositing pass this
+    // package does not own, so a changed `src` snaps exactly like a changed
+    // kind. Same image, moving numbers, interpolates.
+    if (texture.src !== to.src) return to;
+    return {
+      kind: "texture",
+      src: to.src,
+      intensity: lerp(texture.intensity ?? 1, to.intensity ?? 1, t),
+      rotationY: lerp(texture.rotationY ?? 0, to.rotationY ?? 0, t),
+      blur: lerp(texture.blur ?? 0, to.blur ?? 0, t),
+    };
+  }
   const gradient = from as SkyGradient;
+  const equator = lerpOptionalRgb(gradient.equator, to.equator, t);
   return {
     kind: "gradient",
     top: lerpRgb(gradient.top, to.top, t),
     bottom: lerpRgb(gradient.bottom, to.bottom, t),
+    ...(equator === undefined ? {} : { equator }),
     horizon: lerp(gradient.horizon ?? 0.5, to.horizon ?? 0.5, t),
     exponent: lerp(gradient.exponent ?? 1, to.exponent ?? 1, t),
+    intensity: lerp(gradient.intensity ?? 1, to.intensity ?? 1, t),
+  };
+}
+
+function lerpIbl(from: IblSpec | null, to: IblSpec | null, t: number): IblSpec | null {
+  if (from === null || to === null || from.kind !== to.kind) return to;
+  if (to.kind === "room" || to.kind === "estimated") {
+    // Both are markers with two numbers on them: what they point AT cannot be
+    // blended, but how bright and how turned it is can.
+    const marker = from as IblRoom | IblEstimated;
+    return {
+      kind: to.kind,
+      intensity: lerp(marker.intensity ?? 1, to.intensity ?? 1, t),
+      rotationY: lerp(marker.rotationY ?? 0, to.rotationY ?? 0, t),
+    };
+  }
+  if (to.kind === "texture") {
+    const texture = from as IblTexture;
+    if (texture.src !== to.src) return to;
+    return {
+      kind: "texture",
+      src: to.src,
+      intensity: lerp(texture.intensity ?? 1, to.intensity ?? 1, t),
+      rotationY: lerp(texture.rotationY ?? 0, to.rotationY ?? 0, t),
+    };
+  }
+  const gradient = from as IblGradient;
+  const equator = lerpOptionalRgb(gradient.equator, to.equator, t);
+  return {
+    kind: "gradient",
+    top: lerpRgb(gradient.top, to.top, t),
+    bottom: lerpRgb(gradient.bottom, to.bottom, t),
+    ...(equator === undefined ? {} : { equator }),
+    intensity: lerp(gradient.intensity ?? 1, to.intensity ?? 1, t),
+    rotationY: lerp(gradient.rotationY ?? 0, to.rotationY ?? 0, t),
   };
 }
 
@@ -120,6 +188,7 @@ export function interpolateEnvironment(
       fog: lerpFog(from.fog, to.fog, 0),
       ambient: lerpAmbient(from.ambient, to.ambient, 0),
       key: lerpKey(from.key, to.key, 0),
+      ibl: lerpIbl(from.ibl, to.ibl, 0),
     };
   }
   if (t >= 1) return to;
@@ -128,5 +197,6 @@ export function interpolateEnvironment(
     fog: lerpFog(from.fog, to.fog, t),
     ambient: lerpAmbient(from.ambient, to.ambient, t),
     key: lerpKey(from.key, to.key, t),
+    ibl: lerpIbl(from.ibl, to.ibl, t),
   };
 }

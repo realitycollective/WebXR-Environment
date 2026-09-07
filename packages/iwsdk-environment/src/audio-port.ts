@@ -21,7 +21,17 @@
  * A voice that never starts at all (a missing file, a decode failure) would
  * otherwise be tracked forever, so it is reaped after `startTimeoutMs`.
  */
-import { AudioSource, AudioUtils, PlaybackMode, Transform, type Entity, type World } from "@iwsdk/core";
+import {
+  AudioSource,
+  AudioUtils,
+  DistanceModel,
+  PlaybackMode,
+  Quaternion,
+  Transform,
+  Vector3,
+  type Entity,
+  type World,
+} from "@iwsdk/core";
 import type { AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
 
 export interface IWSDKAudioPortOptions {
@@ -72,6 +82,22 @@ export class IWSDKAudioPort implements AudioPort {
       view[1] = request.at[1];
       view[2] = request.at[2];
     }
+    // IWSDK's audio system hands the entity's transform to the same three.js
+    // `PositionalAudio` the other adapter uses, so forward is +Z here too and
+    // the entity is turned to point that axis the way the sound travels.
+    const towards = request.facing ?? null;
+    if (towards !== null) {
+      const facing = TEMP_FACING.set(towards[0], towards[1], towards[2]);
+      if (facing.lengthSq() > 0) {
+        TEMP_ROTATION.setFromUnitVectors(AUDIO_FORWARD, facing.normalize());
+        const view = entity.getVectorView(Transform, "orientation");
+        view[0] = TEMP_ROTATION.x;
+        view[1] = TEMP_ROTATION.y;
+        view[2] = TEMP_ROTATION.z;
+        view[3] = TEMP_ROTATION.w;
+      }
+    }
+    const attenuation = request.spatial;
     entity.addComponent(AudioSource, {
       src: request.cue.src,
       volume: request.gain,
@@ -80,6 +106,25 @@ export class IWSDKAudioPort implements AudioPort {
       autoplay: false,
       // The core already applied the cue's policy before we got here.
       playbackMode: PlaybackMode.Overlap,
+      // Anything the cue did not describe is left to IWSDK's own defaults,
+      // which is why these are spread in rather than defaulted here: this port
+      // has no opinion about how far a sound carries, and inventing one would
+      // make the same cue sound different on each engine.
+      ...(attenuation?.refDistance === undefined ? {} : { refDistance: attenuation.refDistance }),
+      ...(attenuation?.rolloffFactor === undefined
+        ? {}
+        : { rolloffFactor: attenuation.rolloffFactor }),
+      ...(attenuation?.maxDistance === undefined ? {} : { maxDistance: attenuation.maxDistance }),
+      ...(attenuation?.model === undefined ? {} : { distanceModel: distanceModel(attenuation.model) }),
+      // Radians in the contract, degrees on the component - IWSDK passes these
+      // straight to the same Web Audio panner three.js uses.
+      ...(attenuation?.cone === undefined
+        ? {}
+        : {
+            coneInnerAngle: toDegrees(attenuation.cone.inner),
+            coneOuterAngle: toDegrees(attenuation.cone.outer),
+            coneOuterGain: attenuation.cone.outsideGain,
+          }),
     });
     this.#voices.set(request.voiceId, { entity, request, started: false, waitedMs: 0 });
     AudioUtils.play(entity);
@@ -134,4 +179,21 @@ export class IWSDKAudioPort implements AudioPort {
     AudioUtils.stop(voice.entity);
     voice.entity.destroy();
   }
+}
+
+/** Our distance model names onto IWSDK's enum, which holds the same three. */
+function distanceModel(model: "linear" | "inverse" | "exponential"): string {
+  if (model === "linear") return DistanceModel.Linear;
+  if (model === "exponential") return DistanceModel.Exponential;
+  return DistanceModel.Inverse;
+}
+
+/** Web Audio points a source along +Z, and IWSDK's audio system follows it. */
+const AUDIO_FORWARD = new Vector3(0, 0, 1);
+const TEMP_FACING = new Vector3();
+const TEMP_ROTATION = new Quaternion();
+
+/** Radians in the contract; degrees on the component. */
+function toDegrees(radians: number): number {
+  return (radians * 180) / Math.PI;
 }

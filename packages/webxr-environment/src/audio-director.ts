@@ -236,6 +236,8 @@ export class AudioDirector {
       gain,
       loop,
       at: options.at ?? null,
+      spatial: cue.spatial ?? null,
+      facing: options.facing ?? null,
       ended: () => {
         this.#voices.delete(id);
       },

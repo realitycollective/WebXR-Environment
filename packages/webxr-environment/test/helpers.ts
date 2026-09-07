@@ -8,8 +8,12 @@ import type {
   AudioPort,
   AudioVoiceRequest,
   EnvironmentPort,
+  EnvironmentPortHost,
   FogSpec,
+  IblSpec,
   KeyLightSpec,
+  OcclusionSpec,
+  ResolvedLightEstimation,
   SkySpec,
 } from "@realitycollective/webxr-environment";
 
@@ -17,7 +21,8 @@ export type EnvironmentCall =
   | { readonly slot: "sky"; readonly value: SkySpec | null }
   | { readonly slot: "fog"; readonly value: FogSpec | null }
   | { readonly slot: "ambient"; readonly value: AmbientLightSpec | null }
-  | { readonly slot: "key"; readonly value: KeyLightSpec | null };
+  | { readonly slot: "key"; readonly value: KeyLightSpec | null }
+  | { readonly slot: "ibl"; readonly value: IblSpec | null };
 
 export class RecordingEnvironmentPort implements EnvironmentPort {
   readonly calls: EnvironmentCall[] = [];
@@ -34,6 +39,9 @@ export class RecordingEnvironmentPort implements EnvironmentPort {
   }
   applyKeyLight(value: KeyLightSpec | null): void {
     this.calls.push({ slot: "key", value });
+  }
+  applyIbl(value: IblSpec | null): void {
+    this.calls.push({ slot: "ibl", value });
   }
   dispose(): void {
     this.disposed = true;
@@ -132,6 +140,47 @@ export class MinimalEnvironmentPort implements EnvironmentPort {
   applyFog(): void {}
   applyAmbient(): void {}
   applyKeyLight(): void {}
+  applyIbl(): void {}
+}
+
+/**
+ * A port that senses.
+ *
+ * Deliberately a SEPARATE class rather than more members on the recording
+ * port: half the contract is about what a director does when a port has no
+ * depth and no light estimation, and a helper that implemented everything
+ * would make that half untestable.
+ */
+export class SensingEnvironmentPort extends RecordingEnvironmentPort {
+  readonly occlusions: (OcclusionSpec | null)[] = [];
+  readonly estimations: (ResolvedLightEstimation | null)[] = [];
+  /** Set by `observe`; the test uses it to talk back like a real adapter. */
+  host: EnvironmentPortHost | undefined;
+  unobserved = false;
+  /** When false, `observe` returns nothing, as a port with no teardown may. */
+  returnUnobserve = true;
+
+  applyOcclusion(spec: OcclusionSpec | null): void {
+    this.occlusions.push(spec);
+  }
+
+  applyLightEstimation(estimation: ResolvedLightEstimation | null): void {
+    this.estimations.push(estimation);
+  }
+
+  readonly ticks: number[] = [];
+
+  update(deltaMs: number): void {
+    this.ticks.push(deltaMs);
+  }
+
+  observe(host: EnvironmentPortHost): (() => void) | void {
+    this.host = host;
+    if (!this.returnUnobserve) return;
+    return () => {
+      this.unobserved = true;
+    };
+  }
 }
 
 /** A controllable clock for the throttle tests. */

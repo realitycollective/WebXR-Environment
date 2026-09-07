@@ -29,25 +29,62 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 | `@realitycollective/webxr-environment` | The core. Environment and audio logic, with no 3D engine code and **no dependencies at all**. |
 | `@realitycollective/threejs-environment` | Adapter for plain three.js and raw WebXR. No other framework needed. |
 | `@realitycollective/iwsdk-environment` | Adapter for Meta's Immersive Web SDK, driving IWSDK's own environment, lighting and audio machinery. |
+| `@realitycollective/xrblocks-environment` | EXPERIMENTAL adapter for Google XR Blocks. Builds on the three.js adapter and adds XR Blocks' depth occlusion and light estimation. |
 
 > [!NOTE]
-> Pending is a BablylonJS shim to mirror the capabilities of the Service Framework.
+> Pending is a BabylonJS shim to mirror the capabilities of the Service Framework. It waits on a review across all five families rather than being started here.
 
 ### What the core gives you
 
-- **An environment as one document** - sky (vertical gradient or flat colour), fog (linear or exponential), an ambient light and a key light. Plain data: serialisable, diffable, comparable.
+- **An environment as one document** - sky (vertical gradient, flat colour or an authored equirect image), fog (linear or exponential), an ambient light, a key light and an environment map for image-based lighting. Plain data: serialisable, diffable, comparable.
 - **Presets and transitions** - name an environment, then ease to it. Every slot moves together on one curve because they are one document, not five things that happen to be animated at once.
 - **Partial specs** - an omitted slot inherits, an explicit `null` turns the slot off. A "storm" preset can carry only the sky and fog it cares about and layer onto whatever lighting is already there.
 - **One owner for the background** - "who last wrote `scene.background`" is a race the moment two features care about the sky. Here there is exactly one writer, and passthrough is a **suppression** on top of it rather than a second writer: the app keeps describing the sky it wants, the sky stops being drawn while the real world is showing, and it comes back unchanged afterwards. Nothing has to remember what to restore.
 - **Audio the app can mix** - a cue registry, bus and master gains with mute kept separate from level, a retrigger policy per cue (`overlap` / `restart` / `ignore`) and a minimum retrigger interval. The adapter is handed an absolute gain and has no mixing decisions left to make, so a cue sounds the same on every engine. A caller's requested gain is **relative** to that mix, never over it.
+- **Image-based lighting as a slot, not an afterthought** - a gradient, an image, or the host's own room probe. Without it a physically-based material has nothing to reflect: every host keeps the sky and the environment map as two separate facilities, and owning one and not the other is owning half of the lighting.
+- **Sensor-backed features that admit when they do nothing** - real-world depth occlusion and WebXR light estimation are asked for through the director and REPORT back: `unsupported`, `unavailable`, `pending` or `active`, each with a sentence saying why. Both of them fail to a scene that looks completely normal, so an app that could not tell the difference would ship the failure.
+- **The room's own light, as a layer** - `setLightEstimation(true)` lets the host's measurement take over the ambient, key and environment-map slots while it is measuring. The app keeps describing the environment it wants underneath, and turning estimation off hands the slots straight back with nothing to remember.
+- **Passthrough that knows which kind it is** - `setPassthrough` takes the WebXR blend mode as well as a boolean, because `additive` displays ADD what you draw to the real world (black is invisible) while `alpha-blend` composites normally. An app can suppress different slots per mode instead of picking one compromise for both.
+- **Audio that carries its own distance** - a cue says how far it falls off (reference distance, rolloff, maximum distance, curve) rather than every sound in the title sharing one number set by the adapter.
+- **The room, as a separate component** - `WorldSensingDirector` sits beside the environment one and answers a different question: what is actually here. Planes, meshes, anchors and hit tests arrive as plain data with the host's own semantic labels, and the director diffs them so an app is told what appeared, moved and went away rather than re-reading a list every frame. It reports geometry and creates none.
 - **No loop of its own** - `update(deltaMs)` is called by whatever already runs per frame. That is what makes an eight-second dusk a five-line unit test instead of a stopwatch and a headset, and it is why an XR host that only ticks while focused gets the pausing behaviour it expects for free.
 
 ### What each adapter adds
 
 - **three.js** - a gradient sky as a two-pixel-wide equirectangular `DataTexture`, generated by a pure function (no shader, no canvas, headlessly testable) and regenerated in place across a transition rather than reallocated every frame. `Fog` / `FogExp2` mutated while the kind holds, and an `AmbientLight` and a `DirectionalLight` positioned from the direction light travels. Audio over `Audio` / `PositionalAudio`, where a play arriving before its buffer has decoded is **held** rather than dropped - which is why the first press of a session is not silent.
-- **Meta IWSDK** - IWSDK's own `DomeGradient` on the level root (so IWSDK's environment system still hides the background for passthrough), its light components on transform entities, and `AudioSource` with one entity per voice so the core's retrigger policy is the one that applies. Fog is the exception, set on `world.scene`, because IWSDK has no fog component. Setup is one call: `registerEnvironment(world)`.
+- **Meta IWSDK** - IWSDK's own `DomeGradient` and `DomeTexture` on the level root (so IWSDK's environment system still hides the background for passthrough), `IBLGradient` / `IBLTexture` for the environment map (`kind: "room"` is native here), its light components on transform entities, and `AudioSource` with one entity per voice so the core's retrigger policy is the one that applies. Depth occlusion drives `DepthSensingSystem` and the per-entity `DepthOccludable`; because IWSDK opts entities in one at a time, the app says which entities those are and the adapter never removes a component it did not add. IWSDK 0.5.3 has no light estimation, and the adapter says so rather than going quiet. Fog is the exception, set on `world.scene`, because IWSDK has no fog component. Setup is one call: `registerEnvironment(world)`.
+- **Google XR Blocks** - the three.js adapter plus two sensors. Occlusion registers as a client of XR Blocks' `Depth` manager and chooses its blur; light estimation reads the `Lighting` manager, which already owns the WebXR half. Both are configured during XR Blocks' own init, so anything this adapter arrived too late to change is named in the report rather than silently dropped - including the warning that XR Blocks may be lighting the scene itself, which would light the room twice.
 
-Neither adapter creates geometry.
+No adapter creates geometry.
+
+### Which adapter has which sensor
+
+| | three.js | Meta IWSDK | Google XR Blocks |
+| --- | --- | --- | --- |
+| Sky, fog, ambient, key | yes | yes | yes |
+| Image-based lighting | yes (`room` is a neutral ramp without a prefilter) | yes (`room` is native) | yes |
+| Depth occlusion | yes, three.js's own, gpu-optimized depth only | yes, per entity | yes, XR Blocks' occlusion pass |
+| Light estimation | yes, straight from WebXR | no - reported, and requested upstream | yes, via XR Blocks' `Lighting` |
+| Spatial attenuation per cue | yes | yes | yes (three.js audio) |
+| Planes and meshes | yes, from the `XRFrame` | yes, from scene understanding | yes, from its own detectors |
+| Anchors | yes | yes | no - XR Blocks exposes none to read |
+| Hit test | yes, cast from the viewer or from either hand's own ray, with a distance | yes, via `EnvironmentRaycastTarget`; no distance, because IWSDK keeps the ray | no - it places objects rather than reporting |
+| Measured reflections | yes, given a `reflection` hook to reach the cube map | no - reported | no - reported |
+
+### Asking what a host can do
+
+There is no capability list to read before you start, on purpose: what a host can do depends on the session the app asked for, and a list assembled in advance would be a guess. The pattern is **ask, then read the report**, and it is the same for every feature:
+
+```ts
+world.startHitTest({ id: "pointer", space: "right" });
+world.getSensing("hitTest");   // unsupported | unavailable | pending | active, with a reason
+
+world.onSensing((report) => {
+  if (report.feature === "hitTest" && report.state === "active") showPlacementUI();
+});
+```
+
+Detection answers immediately - `setDetection` reports before it returns. Hit testing and light estimation answer on a later frame, because both ask the runtime for something, so subscribe rather than checking once. Everything a host cannot do is a report with a sentence saying which option was not set or which feature the session did not enable; nothing fails silently.
 
 ## Demo
 
@@ -91,8 +128,10 @@ The repository root **is** the npm workspace root - `packages/*` are the publish
 ## Layering rule
 
 ```
-app → ONE adapter (threejs | iwsdk) → core (webxr-environment) → nothing
+app → ONE adapter (threejs | iwsdk | xrblocks) → core (webxr-environment) → nothing
 ```
+
+The XR Blocks adapter is the one exception to "one arrow": it builds on the three.js adapter, because XR Blocks renders through three.js and reimplementing four slots would only let them drift. Adapters inside ONE repository may compose like that; between families nothing references anything, which is the rule that matters.
 
 Arrows only point down, and the core's arrow points at nothing at all. Its architecture test fails the moment an engine import lands in it - or an import of the service framework, or of the input contracts, or a read of `navigator.xr`.
 

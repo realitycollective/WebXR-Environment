@@ -19,6 +19,16 @@
  *    change, a socket message, and the line looks the same. Nothing in the
  *    library knows or cares which.
  *
+ * 5. **A sensor that does nothing says so.** The occlusion toggle asks for
+ *    real-world depth. On a desktop browser there is no session and no depth,
+ *    so the readout says exactly that rather than leaving you to wonder - which
+ *    is the whole reason the reports exist.
+ *
+ * 6. **The room is a separate component.** The world-sensing director is wired
+ *    below beside the environment one, shares nothing with it, and reports the
+ *    same way. On a desktop browser it will say there are no planes because
+ *    there is no session - which is the point.
+ *
  * There is no audio file in the repository - see `cueSrc` below.
  */
 import {
@@ -37,8 +47,12 @@ import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import {
   createThreeAudio,
   createThreeEnvironment,
+  createThreeWorldSensing,
+  DEFAULT_OCCLUSION,
   NOON,
+  SENSING_FEATURES,
   STOCK_PRESETS,
+  WORLD_FEATURES,
 } from "@realitycollective/threejs-environment";
 
 const container = document.getElementById("scene-container") as HTMLDivElement;
@@ -91,6 +105,31 @@ const { director } = createThreeEnvironment(scene, {
   // move away from.
   initial: NOON,
   defaultTransition: { durationMs: 4000, easing: "easeInOut" },
+  // The renderer is what makes the two sensor-backed features reachable. With
+  // it the port can ask three.js whether the session granted depth; without it
+  // the answer is always "unsupported", which is also worth seeing.
+  renderer,
+});
+
+// The metal knot has something to reflect now. `room` is three.js's own
+// RoomEnvironment when a prefilter is supplied and a neutral ramp when it is
+// not, and this demo deliberately does not supply one - the difference is a
+// dull sphere versus a lit one, which is easier to see than to describe.
+director.apply({ ibl: { kind: "room", intensity: 0.8 } });
+
+// --- the room ---------------------------------------------------------------
+// A SECOND director, with its own port. Nothing about it touches the sky: it
+// answers "what is actually in this room", which is placement's question and
+// not the environment's. Detection is asked for here; the session still has to
+// have been created with `plane-detection`, and the readout says when it was
+// not.
+const { director: world } = createThreeWorldSensing(renderer, {
+  detection: { planes: true },
+});
+world.onChange((change) => {
+  // What an app does with this is content: spawn something on a new surface,
+  // drop it when the surface goes. The library reports; it never builds.
+  if (change.added.length > 0) console.info("world:", change.feature, "added", change.added);
 });
 
 // --- the audio --------------------------------------------------------------
@@ -128,6 +167,11 @@ passthroughButton.addEventListener("click", () => {
   director.setPassthrough(!director.passthrough);
 });
 
+const occlusionButton = document.getElementById("occlusion") as HTMLButtonElement;
+occlusionButton.addEventListener("click", () => {
+  director.setOcclusion(director.occlusion === null ? DEFAULT_OCCLUSION : null);
+});
+
 const cueButton = document.getElementById("cue") as HTMLButtonElement;
 cueButton.addEventListener("click", () => {
   void audioPort.resume().then(() => {
@@ -140,6 +184,26 @@ const master = document.getElementById("master") as HTMLInputElement;
 master.addEventListener("input", () => audio.setMasterGain(Number(master.value)));
 const ambience = document.getElementById("ambience") as HTMLInputElement;
 ambience.addEventListener("input", () => audio.setBusGain("ambience", Number(ambience.value)));
+
+// The readout that makes an absent sensor visible. Without this, "occlusion is
+// on and doing nothing" and "occlusion is working, nothing is in front of you"
+// are the same picture.
+const sensing = document.getElementById("sensing") as HTMLDivElement;
+function describe(report: { state: string; detail?: string }): string {
+  return `${report.state}${report.detail === undefined ? "" : ` (${report.detail})`}`;
+}
+function showSensing(): void {
+  // Two directors, one vocabulary. The environment one answers for the
+  // features it owns; the world one answers for the room.
+  const environment = SENSING_FEATURES.filter(
+    (feature) => !WORLD_FEATURES.includes(feature as (typeof WORLD_FEATURES)[number]),
+  ).map((feature) => `${feature}: ${describe(director.getSensing(feature))}`);
+  const room = WORLD_FEATURES.map((feature) => `${feature}: ${describe(world.getSensing(feature))}`);
+  sensing.textContent = [...environment, ...room].join(" · ");
+}
+director.onSensing(showSensing);
+world.onSensing(showSensing);
+showSensing();
 
 const state = document.getElementById("state") as HTMLDivElement;
 director.onChange((applied, requested) => {
@@ -155,6 +219,7 @@ const clock = new Clock();
 renderer.setAnimationLoop(() => {
   const deltaMs = clock.getDelta() * 1000;
   director.update(deltaMs);
+  world.update(deltaMs);
   audio.update(deltaMs);
   knot.rotation.y += deltaMs * 0.0004;
   renderer.render(scene, camera);

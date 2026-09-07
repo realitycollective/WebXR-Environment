@@ -13,8 +13,8 @@
 // three.js comes through @iwsdk/core here, not from "three" directly: IWSDK
 // ships its own pinned @types/three, and a Scene built from the other copy is
 // a structurally different type that will not fit `world.scene`.
-import { Scene } from "@iwsdk/core";
-import type { Object3D } from "@iwsdk/core";
+import { Object3D, Scene } from "@iwsdk/core";
+
 
 export interface FakeEntity {
   readonly id: number;
@@ -92,30 +92,88 @@ export function createFakeEntity(object3D?: Object3D): FakeEntity {
   return entity;
 }
 
+/**
+ * A registered system, with its config as the signal-shaped objects elics
+ * hands out. `value` is a plain property here; what is under test is which
+ * number the port wrote, not how a signal notifies.
+ */
+export interface FakeSystem {
+  readonly config: Record<string, { value: unknown }>;
+}
+
 export interface FakeWorld {
   readonly scene: Scene;
   activeLevel: { value: FakeEntity | null };
   readonly created: FakeEntity[];
   readonly registeredSystems: unknown[];
   createTransformEntity(object?: Object3D, options?: { parent?: FakeEntity }): FakeEntity;
-  registerSystem(system: unknown): void;
+  registerSystem(system: unknown, options?: { configData?: Record<string, unknown> }): void;
+  getSystem(system: unknown): FakeSystem | undefined;
+  /** elics registers queries here; the world-sensing port reads their sets. */
+  queryManager: {
+    registerQuery(config: { required: unknown[] }): { entities: Set<FakeEntity> };
+  };
+  /** The set behind the query for one component, so a test can fill it. */
+  entitiesWith(component: unknown): Set<FakeEntity>;
 }
 
 export function createFakeWorld(options: { withLevel?: boolean } = {}): FakeWorld {
   const created: FakeEntity[] = [];
+  const systems = new Map<unknown, FakeSystem>();
+  const queries = new Map<unknown, Set<FakeEntity>>();
   return {
     scene: new Scene(),
     activeLevel: { value: options.withLevel === false ? null : createFakeEntity() },
     created,
     registeredSystems: [],
     createTransformEntity(object, entityOptions) {
-      const entity = createFakeEntity(object);
+      // A TRANSFORM entity always has an Object3D in IWSDK - that is what the
+      // name means - so the fake gives it one rather than leaving a hole the
+      // real world never has.
+      const entity = createFakeEntity(object ?? new Object3D());
       entity.parent = entityOptions?.parent;
       created.push(entity);
       return entity;
     },
-    registerSystem(system) {
+    registerSystem(system, systemOptions) {
       this.registeredSystems.push(system);
+      // elics gives a registered system EVERY key in its schema, defaulted.
+      // The fake cannot read the schema, so it hands out a signal for any key
+      // asked for - otherwise a port that writes a prop it did not register
+      // with would pass here and throw on a headset.
+      const seeded: Record<string, { value: unknown }> = {};
+      for (const [key, value] of Object.entries(systemOptions?.configData ?? {})) {
+        seeded[key] = { value };
+      }
+      const config = new Proxy(seeded, {
+        get(target, key: string) {
+          target[key] ??= { value: undefined };
+          return target[key];
+        },
+      });
+      systems.set(system, { config });
+    },
+    getSystem(system) {
+      return systems.get(system);
+    },
+    queryManager: {
+      registerQuery(config) {
+        const key = config.required[0];
+        let set = queries.get(key);
+        if (set === undefined) {
+          set = new Set<FakeEntity>();
+          queries.set(key, set);
+        }
+        return { entities: set };
+      },
+    },
+    entitiesWith(component) {
+      let set = queries.get(component);
+      if (set === undefined) {
+        set = new Set<FakeEntity>();
+        queries.set(component, set);
+      }
+      return set;
     },
   };
 }
@@ -123,4 +181,9 @@ export function createFakeWorld(options: { withLevel?: boolean } = {}): FakeWorl
 /** The adapters take the real `World` type; tests hand them this instead. */
 export function asWorld(world: FakeWorld): never {
   return world as never;
+}
+
+/** The same escape hatch for an entity, used by the occlusion tests. */
+export function asEntity(entity: FakeEntity): never {
+  return entity as never;
 }

@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@realitycollective/threejs-environment": "*",
-    "three": "npm:super-three@0.181.0"
+    "three": "npm:super-three@0.185.0"
   },
   "devDependencies": {
     "@types/three": "*",

@@ -55,6 +55,59 @@ const stop = interactions.runtime.onEvent((event) => {
 
 If a source is there, the app binds it. If it is not, nothing happens and neither package notices.
 
+## The second seam: sensing (added 2026-09-07)
+
+The package began write-only, and said so: presets in, port calls out, no reporting mechanism, by design. That was right while every slot was a decision the app had already made, because the app can SEE a sky.
+
+It stops being right the moment a feature is backed by a sensor. Depth occlusion is granted or refused by the session; light estimation starts and stops as the runtime gains and loses confidence; and both fail to a scene that looks completely normal. "Occlusion is on and doing nothing" and "occlusion is working, and nothing is in front of you" are the same picture.
+
+So there is now exactly one inbound path - `EnvironmentPort.observe(host)` - carrying two kinds of message: a REPORT (`unsupported` / `unavailable` / `pending` / `active`, plus a sentence for a human), and an ESTIMATE (measured lighting, in the same spec types the app already writes). The rule that keeps it from becoming a back door: **a report never changes what the app asked for; it changes what the app can be told.** The estimate is the single exception and an explicit one, opted into with `setLightEstimation` and layered over the light slots the way passthrough is layered over the sky.
+
+**What passed the boundary test, and why.** Each of these is a facility the host exposes, which differs per host - the same test as sky and fog:
+
+| Capability | three.js | Meta IWSDK | Google XR Blocks |
+| --- | --- | --- | --- |
+| Image-based lighting | `scene.environment` + intensity + rotation | `IBLGradient` / `IBLTexture`, including a native `"room"` | inherited from three.js |
+| Authored sky texture | equirect `scene.background` + blur | `DomeTexture` | inherited from three.js |
+| Depth occlusion | built into the renderer since r158, gpu-optimized only | `DepthSensingSystem` + per-entity `DepthOccludable`, three shader modes | its own `Depth` manager and occlusion pass, plus the WebXR session preferences the other two hide |
+| Light estimation | `XREstimatedLight` | none at all | its `Lighting` module, over the same three.js class |
+| Spatial attenuation per cue | `PositionalAudio` | `AudioSource` with a `DistanceModel` | three.js audio |
+
+Three of those differ so sharply that a contract built from the thinnest one would have made the other two worse, which is why `OcclusionSpec` takes its modes from IWSDK and its session preferences from XR Blocks, and why the sky gradient gained an optional horizon stop: IWSDK's dome has always been a three-stop ramp, and the adapter was inventing the middle colour because the contract could not carry one.
+
+**What was turned down, and why.**
+
+| Turned down | Why | Whose |
+| --- | --- | --- |
+| A body solved from the head and hands (embodiment) | No host exposes a body. The tracked poses are the host facility and they are WebXR-Input's contract; the solver is pure trigonometry, and the meshes it drives are content. Housing it here would repeat the `GroundSpec` mistake below, with a better disguise | the app, or a package named for what it is |
+| XR Blocks' depth MESH - colliders, hole patching, shadow receiving, downsampled geometry | A mesh with colliders is geometry and physics, both already outside this repository. The sensing knobs beside it - usage, format, update rate - were taken; the mesh was not | the app |
+| XR Blocks' segmentation, humans and faces | Perception features that produce content, not an environment the app describes | the app |
+| Reflection cube maps from `XRWebGLBinding` | Needs a live GL context and a prefilter pass, which is a renderer's job. The port reports that the `ibl` part of an estimate was not measured rather than inventing one | the app's renderer |
+| Requesting `depth-sensing` on the session | Unchanged from the original rule: the session is the platform layer's. Recorded upstream as item 2.5, because the feature needs an init dictionary a feature string cannot express | service-framework |
+
+**Planes, meshes, anchors and hit test are a SEPARATE COMPONENT, not slots.** They are real platform sensing and they differ per host, but none of them feeds the environment: they feed placement, locomotion, physics and interaction. So `WorldSensingDirector` sits beside `EnvironmentDirector` with its own port, its own registries and no reference to `EnvironmentSpec` in either direction. The two share exactly one thing, the vocabulary their reports are written in, so a single readout can cover everything a host was asked for.
+
+The rule that keeps it inside the boundary is the same one as everywhere else: **it reports geometry, it does not make any.** A plane arrives as a pose, a size and the host's own semantic label; a mesh's vertices are the runtime's buffers passed through by reference, never copied and never mutated. Nothing here builds a `Mesh`, a collider, a material or a debug visualisation, and what an app does with a table it has been told about is the app's, exactly as a floor always was.
+
+Three hosts, three different amounts of help, all of it reported honestly:
+
+| | three.js and raw WebXR | Meta IWSDK | Google XR Blocks |
+| --- | --- | --- | --- |
+| Planes | read from the `XRFrame` | entities carrying `XRPlane` | `PlaneDetector`, already three.js objects |
+| Meshes | `XRMesh` buffers, measured once per change | `XRMesh` component, IWSDK measured it already | `MeshDetector`, measured from the geometry |
+| Anchors | `frame.createAnchor` and `trackedAnchors` | an entity with `XRAnchor` on it | **none** - XR Blocks places objects for you and exposes nothing to read |
+| Hit test | `requestHitTestSource` | `EnvironmentRaycastTarget` on an entity | **none** - `placeOnSurface` moves an object rather than answering |
+
+What still belongs to somebody else: requesting `plane-detection`, `mesh-detection`, `anchors` or `hit-test` on the session (the platform layer's, as ever), turning a detected plane into a floor an avatar can walk on (physics, the app's), and deciding what to spawn on a table (content, the app's).
+
+**Generalise the parameters, pass through the vocabulary.** Where two hosts do the same thing with different spellings, the contract carries it in ITS OWN terms and each adapter converts - that is what the abstraction is for, and losing a capability because the spellings differ would make this package the thing removing it. Directional audio is the worked example: angles are radians here because every other angle here is, both adapters convert to the degrees their host wants, and neither the app nor the contract mentions a panner.
+
+That rule governs the parameters OF a capability. It deliberately does not govern open-ended vocabularies: semantic labels stay the host's own strings, because mapping them to a closed set would lose a label every time a runtime adds one, which is degradation pointing the other way. And where a host lacks the MECHANISM rather than the spelling - three.js occludes everything or nothing, IWSDK occludes per entity - no naming bridges it, so the contract expresses the richer form and reports what could not be honoured. Never the intersection, never silence.
+
+**A measured reflection is a marker, not a value.** Light estimation produces three things, and two of them - a spherical-harmonic probe and a primary light - convert cleanly into the plain data this package trades in. The third, a reflection cube map, does not: it is a live texture on a GPU that the runtime keeps replacing. Rather than pretend a texture is a value, or drop the capability, `IblSpec` gained `{ kind: "estimated" }`: the app says "use what you measured", the adapter that measured it applies it, and the document stays plain data with one honest hole in it. An adapter that measures nothing reports `unsupported` and leaves the app's own environment map alone.
+
+**Adapters inside this repository may build on each other.** `xrblocks-environment` extends `threejs-environment`, because XR Blocks renders through three.js and reimplementing four slots would only let them drift - exactly as `xrblocks-interactions` builds on `threejs-interactions`. The no-references rule is between FAMILIES, and it is unchanged: nothing here imports, types against, or tests against a sibling repository.
+
 ---
 
 ---
