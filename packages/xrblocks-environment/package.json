@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/xrblocks-environment",
-  "version": "0.1.0-preview.1",
+  "version": "0.1.0-preview.2",
   "description": "EXPERIMENTAL Google XR Blocks / plain three.js adapter for the Reality Collective WebXR Environment Extensions - drives sky, fog and lighting through the three.js adapter it builds on, and adds real-world depth occlusion and WebXR light estimation over an XR Blocks core.",
   "keywords": [
     "realitycollective",
@@ -36,8 +36,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/threejs-environment": "^0.1.0-preview.1",
-    "@realitycollective/webxr-environment": "^0.1.0-preview.1"
+    "@realitycollective/threejs-environment": "^0.1.0-preview.2",
+    "@realitycollective/webxr-environment": "^0.1.0-preview.2"
   },
   "peerDependencies": {
     "three": ">=0.170.0"
