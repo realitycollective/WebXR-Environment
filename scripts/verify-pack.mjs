@@ -13,8 +13,11 @@
  * into a throwaway project outside the repo, and asserts the result is usable.
  * It then lints the shape of what shipped: publint checks the manifest and the
  * files it points at, and attw (Are The Types Wrong) resolves the published
- * types under every module resolution mode a consumer might use. It is the
- * only check that would catch a package which builds green but ships broken.
+ * types under every module resolution mode a consumer might use, and, where
+ * release.config.json's `declarationCheck` opts the repository in,
+ * scripts/declaration-check.mjs type-checks those declarations with library
+ * checking on, which attw does not do. Together they are the only checks that
+ * would catch a package which builds green but ships broken.
  *
  * The package set and the smoke tests are read from scripts/release.config.json,
  * so this file is identical in every Reality Collective TypeScript repository.
@@ -244,6 +247,47 @@ try {
     }
     check(problem === '', `${name}: published types resolve under every module resolution mode${problem ? `\n${problem}` : ''}`);
   });
+
+  // The contents of what shipped, where a repository opts in with
+  // `declarationCheck`. attw proves the published types RESOLVE; this proves
+  // they TYPE-CHECK, as a consumer with `skipLibCheck: false`, or one
+  // emitting declarations of its own on top of ours, sees them. A name our
+  // build emitted unresolved (a host's own declaration file can leave one
+  // behind under skipLibCheck, and the emitter preserves it verbatim) fails
+  // such a consumer with TS2304 and passes everything above. Checked under
+  // nodenext and bundler resolution, in the repository rather than the clean
+  // consumer, because the peers the consumer install deliberately omits are
+  // what the declarations import. Diagnostics inside upstream declaration
+  // files are counted and ignored; they are not ours to fix.
+  //
+  // Not every repository opts in. Only a FOREIGN declaration can put a name
+  // into our emitted types that the build did not already check, so where the
+  // published declarations reach nothing but our own packages and
+  // TypeScript's own lib there is nothing here to catch. Each run reports the
+  // foreign files it reached, so the opt-in stays a measured decision rather
+  // than a habit. See the header of scripts/declaration-check.mjs.
+  if (CONFIG.declarationCheck) {
+    const { checkDeclarations, formatDiagnostic } = await import('./declaration-check.mjs');
+    console.log('');
+    console.log('type-checking the published declarations with library checking on:');
+    const declarations = checkDeclarations({ packageDirs: PACKAGES.map((name) => path.join(ROOT, 'packages', name)) });
+    for (const mode of declarations.modes) {
+      for (const diagnostic of mode.global) {
+        check(false, `${mode.moduleResolution}: ${formatDiagnostic(diagnostic)}`);
+      }
+      check(
+        mode.foreignDeclarations > 0,
+        `${mode.moduleResolution}: the check reaches ${mode.foreignDeclarations} foreign declaration file(s). At zero it cannot fail, and the build already covers what is left, so drop "declarationCheck" from scripts/release.config.json rather than keep a gate that only ever passes.`,
+      );
+      for (const pkg of mode.packages) {
+        const detail = pkg.diagnostics.map((diagnostic) => `  ${formatDiagnostic(diagnostic)}`).join('\n');
+        check(
+          pkg.diagnostics.length === 0,
+          `${pkg.name}: ${pkg.entry} type-checks under ${mode.moduleResolution} (${mode.upstream} diagnostic(s) in ${mode.foreignDeclarations} foreign file(s), ignored)${detail ? `\n${detail}` : ''}`,
+        );
+      }
+    }
+  }
 } catch (err) {
   console.log('');
   console.log(`  FAIL  ${err.message}`);

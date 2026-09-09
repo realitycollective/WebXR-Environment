@@ -9,6 +9,7 @@
   "importCheck": [
     "webxr-environment"
   ],
+  "declarationCheck": true,
   "preid": "preview",
   "legacyPeerDeps": true,
   "prebundle": {

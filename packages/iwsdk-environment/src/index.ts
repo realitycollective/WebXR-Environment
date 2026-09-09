@@ -4,7 +4,8 @@
  * Re-exports the whole engine-free core, so an app installs this package and
  * nothing else.
  */
-import { createSystem, type Entity, type World } from "@iwsdk/core";
+import type { Entity, World } from "@iwsdk/core";
+import { createSystem } from "./create-system.js";
 import type {
   AudioDirectorOptions,
   EnvironmentDirectorOptions,
