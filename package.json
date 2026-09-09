@@ -9,7 +9,8 @@
     "demos/*"
   ],
   "overrides": {
-    "three": "npm:super-three@0.185.0"
+    "three": "npm:super-three@0.185.0",
+    "@types/three": "0.185.4"
   },
   "scripts": {
     "build": "npm --workspace @realitycollective/webxr-environment run build && npm --workspace @realitycollective/threejs-environment run build && npm --workspace @realitycollective/iwsdk-environment run build && npm --workspace @realitycollective/xrblocks-environment run build",
@@ -17,20 +18,25 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "verify:pack": "node scripts/verify-pack.mjs",
+    "release": "node scripts/release.mjs",
     "build:playground": "npm run build && npm --workspace environment-playground run build",
     "build:demos": "npm run build:playground",
     "dev:playground": "npm run dev -w environment-playground",
     "smoke": "node scripts/smoke-deploy.mjs"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@iwsdk/core": "0.5.3",
     "@types/node": "^22.20.1",
-    "@types/three": "^0.185.0",
+    "@types/three": "0.185.4",
     "@vitest/coverage-v8": "^4.1.8",
     "playwright-core": "^1.61.1",
+    "publint": "^0.3.24",
     "three": "npm:super-three@0.185.0",
     "typescript": "^5.5.0",
     "vite": "^7.1.4",
+    "vite-7": "npm:vite@^7.3.6",
+    "vite-8": "npm:vite@^8.0.0",
     "vitest": "^4.1.8"
   },
   "engines": {

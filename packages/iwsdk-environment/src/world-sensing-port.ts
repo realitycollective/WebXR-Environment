@@ -27,15 +27,14 @@
 import {
   EnvironmentRaycastSystem,
   EnvironmentRaycastTarget,
-  Quaternion,
   RaycastSpace,
-  Vector3,
   XRAnchor,
   XRMesh,
   XRPlane,
   type Entity,
   type World,
 } from "@iwsdk/core";
+import { Quaternion, Vector3 } from "three";
 import type {
   HitTestRequest,
   ResolvedWorldDetection,

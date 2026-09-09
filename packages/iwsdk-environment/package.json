@@ -38,12 +38,13 @@
     "@realitycollective/webxr-environment": "^0.1.0-preview.2"
   },
   "peerDependencies": {
-    "@iwsdk/core": ">=0.5.0 <0.6.0"
+    "@iwsdk/core": ">=0.5.0 <0.6.0",
+    "three": ">=0.170.0"
   },
   "devDependencies": {
     "@iwsdk/core": "0.5.3",
     "three": "npm:super-three@0.185.0",
-    "@types/three": "*"
+    "@types/three": "0.185.4"
   },
   "repository": {
     "type": "git",

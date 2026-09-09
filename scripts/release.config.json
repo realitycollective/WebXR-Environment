@@ -10,5 +10,26 @@
     "webxr-environment"
   ],
   "preid": "preview",
-  "legacyPeerDeps": true
+  "legacyPeerDeps": true,
+  "prebundle": {
+    "bundlers": [
+      {
+        "id": "vite7",
+        "package": "vite-7",
+        "detectsStarHops": true
+      },
+      {
+        "id": "vite8",
+        "package": "vite-8",
+        "detectsStarHops": false
+      }
+    ],
+    "packages": {
+      "iwsdk-environment": {
+        "hosts": [
+          "@iwsdk/core"
+        ]
+      }
+    }
+  }
 }

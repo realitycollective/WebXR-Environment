@@ -35,17 +35,14 @@ import {
   DirectionalLightComponent,
   DomeGradient,
   DomeTexture,
-  Fog,
-  FogExp2,
   IBLGradient,
   IBLTexture,
   OcclusionShadersMode,
-  Quaternion,
   Transform,
-  Vector3,
   type Entity,
   type World,
 } from "@iwsdk/core";
+import { Fog, FogExp2, Quaternion, Vector3 } from "three";
 import type {
   AmbientLightSpec,
   EnvironmentPort,

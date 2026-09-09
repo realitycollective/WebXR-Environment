@@ -26,12 +26,11 @@ import {
   AudioUtils,
   DistanceModel,
   PlaybackMode,
-  Quaternion,
   Transform,
-  Vector3,
   type Entity,
   type World,
 } from "@iwsdk/core";
+import { Quaternion, Vector3 } from "three";
 import type { AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
 
 export interface IWSDKAudioPortOptions {

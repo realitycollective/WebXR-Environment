@@ -11,8 +11,10 @@
  * This script closes that gap. It packs every package exactly as the publish
  * workflow does - LICENSE and CHANGELOG copied in first - installs the tarballs
  * into a throwaway project outside the repo, and asserts the result is usable.
- * It is the only check that would catch a package which builds green but ships
- * broken.
+ * It then lints the shape of what shipped: publint checks the manifest and the
+ * files it points at, and attw (Are The Types Wrong) resolves the published
+ * types under every module resolution mode a consumer might use. It is the
+ * only check that would catch a package which builds green but ships broken.
  *
  * The package set and the smoke tests are read from scripts/release.config.json,
  * so this file is identical in every Reality Collective TypeScript repository.
@@ -67,6 +69,18 @@ function manifestOf(dir) {
 /** @realitycollective/webxr-input @ 0.1.0 -> realitycollective-webxr-input-0.1.0.tgz */
 function tarballName(manifest) {
   return `${manifest.name.replace(/^@/, '').replace(/\//g, '-')}-${manifest.version}.tgz`;
+}
+
+/**
+ * The JS entry of a dev-dependency CLI, spawned through node rather than its
+ * .cmd shim, which Node >= 20 refuses to execFile on Windows.
+ */
+function devCli(packageName, relativeBin) {
+  const bin = path.join(ROOT, 'node_modules', ...packageName.split('/'), relativeBin);
+  if (!existsSync(bin)) {
+    throw new Error(`${packageName} is not installed; run npm install`);
+  }
+  return bin;
 }
 
 const workdir = mkdtempSync(path.join(tmpdir(), 'rc-verify-'));
@@ -196,6 +210,40 @@ try {
       `${smoke.package}: ${smoke.bin} CLI runs from the installed package`,
     );
   }
+
+  // The shape of what shipped. publint reads the package directory (manifest
+  // fields, the files they point at, ESM/CJS consistency); warnings count as
+  // errors so a drift is caught the first time. attw reads the tarball and
+  // resolves the published types under node10, node16 (CJS and ESM) and
+  // bundler resolution. `cjs-resolves-to-esm` is ignored by design: every
+  // package is ESM-only, and a require() caller is expected to use a dynamic
+  // import. Neither tool needs the network.
+  console.log('');
+  console.log('linting the shape of the published packages:');
+  const publintCli = devCli('publint', 'src/cli.js');
+  const attwCli = devCli('@arethetypeswrong/cli', 'dist/index.js');
+  PACKAGES.forEach((name, index) => {
+    let problem = '';
+    try {
+      run(process.execPath, [publintCli, path.join(ROOT, 'packages', name), '--strict'], ROOT, `publint ${name}`);
+    } catch (err) {
+      problem = err.message;
+    }
+    check(problem === '', `${name}: publint finds no packaging problems${problem ? `\n${problem}` : ''}`);
+
+    problem = '';
+    try {
+      run(
+        process.execPath,
+        [attwCli, tarballs[index], '--ignore-rules', 'cjs-resolves-to-esm', '--format', 'ascii'],
+        ROOT,
+        `attw ${name}`,
+      );
+    } catch (err) {
+      problem = err.message;
+    }
+    check(problem === '', `${name}: published types resolve under every module resolution mode${problem ? `\n${problem}` : ''}`);
+  });
 } catch (err) {
   console.log('');
   console.log(`  FAIL  ${err.message}`);

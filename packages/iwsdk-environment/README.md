@@ -45,7 +45,7 @@ It drives IWSDK's own machinery rather than reaching past it to three.js:
 
 Every one of those is an IWSDK platform component with no app-side equivalent. The adapter creates **no geometry**: a floor would be a mesh, and meshes are the app's.
 
-**Fog is the exception.** IWSDK has no fog component, so it is set on `world.scene` directly, with `Fog` / `FogExp2` imported from `@iwsdk/core` (one three.js instance, reached through the framework's re-export).
+**Fog is the exception.** IWSDK has no fog component, so it is set on `world.scene` directly, with `Fog` / `FogExp2` imported from `three`, a declared peer. Importing them through `@iwsdk/core`'s `export * from 'three'` looked equivalent, but a consumer that excludes `three` from Vite's dependency optimizer cannot resolve names that only exist behind that star.
 
 ## Knowing when a sound finished
 
@@ -63,9 +63,11 @@ adapter.onCapabilitiesChange((c) => env.environment.setPassthrough(c.passthrough
 
 A session belongs to the platform layer, not to the environment. `setPassthrough(true)` suppresses the sky and fog on top of whatever the app asked for, and turning it off restores exactly what was there - nothing has to remember what to put back.
 
-## Peer dependency
+## Peer dependencies
 
 `@iwsdk/core >= 0.5.0 < 0.6.0`, developed and tested against 0.5.3.
+
+`three >= 0.170.0`, which every IWSDK application already carries (IWSDK projects alias it to `super-three`). The adapter imports three.js classes from `three` directly rather than through `@iwsdk/core`'s star re-export, so it prebundles even when an application excludes `three` from Vite's dependency optimizer to transform its source.
 
 ## Licence
 

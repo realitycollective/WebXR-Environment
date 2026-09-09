@@ -10,10 +10,12 @@
  * misspelled field name pass, which is precisely the bug an adapter is most
  * likely to have.
  */
-// three.js comes through @iwsdk/core here, not from "three" directly: IWSDK
-// ships its own pinned @types/three, and a Scene built from the other copy is
-// a structurally different type that will not fit `world.scene`.
-import { Object3D, Scene } from "@iwsdk/core";
+// `@types/three` is pinned once for the whole workspace (root `overrides`), so
+// the `Scene` built here and the one `world.scene` is typed with are the same
+// declaration. Before that pin, IWSDK's own copy of the typings made them two
+// structurally different types, which is why this used to import through
+// `@iwsdk/core`.
+import { Object3D, Scene } from "three";
 
 
 export interface FakeEntity {
