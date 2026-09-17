@@ -22,6 +22,13 @@
  *     [--settle 2500]          ms to wait after load for late errors
  *     [--timeout 45000]        ms navigation timeout
  *     [--retries 3]            navigation attempts, for a CDN that is still warming
+ *     [--tls-wait 180000]      ms to keep retrying while the TLS handshake fails
+ *
+ * The TLS wait exists because a Cloudflare Pages project issues its
+ * certificate asynchronously after it is created. The first deploy to a new
+ * project serves ERR_SSL_VERSION_OR_CIPHER_MISMATCH for a minute or two, then
+ * comes good. That is not a broken site, so a handshake failure is retried on
+ * its own budget rather than counted against --retries.
  *
  * Uses playwright-core against the Chrome that GitHub's runner images already
  * ship, so there is no browser download. Set SMOKE_BROWSER_CHANNEL to override
@@ -36,6 +43,7 @@ let mount = '#root';
 let settle = 2500;
 let timeout = 45000;
 let retries = 3;
+let tlsWait = 180000;
 
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -44,6 +52,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--settle') settle = Number(argv[++i]);
   else if (a === '--timeout') timeout = Number(argv[++i]);
   else if (a === '--retries') retries = Number(argv[++i]);
+  else if (a === '--tls-wait') tlsWait = Number(argv[++i]);
   else if (a.startsWith('--')) { console.error(`unknown flag ${a}`); process.exit(2); }
   else urls.push(a);
 }
@@ -52,6 +61,9 @@ if (urls.length === 0) {
   console.error('usage: node scripts/smoke-deploy.mjs <url> [<url>...] [--mount sel] [--ignore re]');
   process.exit(2);
 }
+
+/** A handshake that fails because the edge has no certificate for the host yet. */
+const TLS_NOT_READY = /ERR_SSL_VERSION_OR_CIPHER_MISMATCH|ERR_SSL_PROTOCOL_ERROR|ERR_CERT_COMMON_NAME_INVALID|ERR_CONNECTION_CLOSED/i;
 
 /** Noise that is expected on a headless runner and must not fail the gate. */
 const DEFAULT_IGNORES = [
@@ -103,22 +115,33 @@ for (const url of urls) {
   console.log(`\n-> ${url}`);
   let response = null;
   let navError = null;
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  let attempt = 0;
+  const started = Date.now();
+  for (;;) {
+    attempt++;
     try {
       response = await page.goto(url, { waitUntil: 'load', timeout });
       navError = null;
       break;
     } catch (err) {
       navError = err;
+      const elapsed = Date.now() - started;
+      if (TLS_NOT_READY.test(err.message) && elapsed < tlsWait) {
+        console.log(`   TLS not ready yet (${Math.round(elapsed / 1000)}s of ${Math.round(tlsWait / 1000)}s), waiting...`);
+        await page.waitForTimeout(10000);
+        continue;
+      }
       if (attempt < retries) {
         console.log(`   navigation attempt ${attempt} failed, retrying...`);
         await page.waitForTimeout(3000 * attempt);
+        continue;
       }
+      break;
     }
   }
 
   if (navError) {
-    problems.push(`navigation failed after ${retries} attempts: ${navError.message}`);
+    problems.push(`navigation failed after ${attempt} attempts: ${navError.message}`);
   } else {
     if (response && response.status() >= 400) {
       problems.push(`document returned HTTP ${response.status()}`);
