@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AmbientLight, Color, DirectionalLight, Fog, FogExp2, Group, Scene } from "three";
+import { AmbientLight, Color, type DataTexture, DirectionalLight, Fog, FogExp2, Group, Scene } from "three";
 import type { FogSpec, SkySpec } from "@realitycollective/threejs-environment";
 import { ThreeEnvironmentPort, createThreeEnvironment } from "@realitycollective/threejs-environment";
 
@@ -51,14 +51,27 @@ describe("ThreeEnvironmentPort", () => {
       expect(scene.background).toHaveProperty("isTexture", true);
     });
 
-    it("reuses the texture across a transition instead of reallocating", () => {
-      // The director pushes a new gradient on every frame of a fade; a fresh
-      // DataTexture per frame would be a GPU upload per frame for no reason.
+    it("swaps in a new texture when the gradient changes and disposes the old one", () => {
+      // three.js caches the cube map it derives from an equirectangular
+      // background per texture object until that texture is disposed, so a
+      // gradient refilled in place would never change on screen. Refilling
+      // was the previous behaviour, and the sky stayed at its first frame
+      // through every transition.
       const { scene, port } = setup();
       port.applySky(GRADIENT);
-      const first = scene.background;
+      const first = scene.background as DataTexture;
+      let disposed = 0;
+      first.addEventListener("dispose", () => (disposed += 1));
       port.applySky({ ...GRADIENT, top: [0, 1, 0] });
-      expect(scene.background).toBe(first);
+      const second = scene.background as DataTexture;
+      expect(second).not.toBe(first);
+      expect(second).toHaveProperty("isTexture", true);
+      expect(disposed).toBe(1);
+      // The new texture carries the new gradient: the zenith is the last row
+      // in memory, and it is now green rather than blue.
+      const pixels = second.image.data as Uint8Array;
+      const zenith = pixels.length - 4;
+      expect(pixels[zenith + 1]!).toBeGreaterThan(pixels[zenith + 2]!);
     });
 
     it("releases the texture when the sky goes away", () => {

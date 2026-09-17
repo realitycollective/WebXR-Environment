@@ -4,6 +4,14 @@ Change log for the Reality Collective WebXR Environment Extensions packages. All
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
+## [0.1.1]
+
+### Fixed
+
+- `@realitycollective/threejs-environment` - a gradient sky never changed after its first frame. Choosing `night` in the playground moved the lights and the fog while the sky stayed at noon; only a solid sky, which is a plain `Color`, followed a transition. `applySky` refilled the pixels of the one `DataTexture` and set `needsUpdate`, but three.js converts an equirectangular `scene.background` into a cube map once per texture object and keeps that cube map until the texture is disposed, so the 2D texture was re-uploaded and the sky on screen never re-derived. The port now builds a fresh texture on every gradient change, swaps it in and disposes the previous one, which is what drops the cached cube map; the texture is 2 by 64 texels, so the extra upload during a transition is negligible and the cube conversion costs the same either way. The test that pinned the old in-place refill now pins the swap and the disposal instead. `@realitycollective/xrblocks-environment` inherits the fix. Found while photographing the live playground for the Reality Collective site, on a real GPU as well as in software rendering.
+- `@realitycollective/threejs-environment` - `XrInputSourceLike` is exported. It was the element type of `XrSessionLike.inputSources` but not exported itself, so a consumer typing a fake session for a test had nothing to name, and TypeDoc flagged it as referenced but undocumented.
+- CI - the staging deploy published under `--branch=pr-<number>` while the `-test` Pages project's production branch is `staging`, so only `pr-<n>.webxr-environment-test.pages.dev` aliases were ever created and the project's root URL was a 404. It now deploys as `staging` on every pull request and on every push to `development`, so `webxr-environment-test.pages.dev` serves the newest preview build, the same arrangement WebXR-UIExtensions already had.
+
 ## [0.1.0] - 2026-09-17
 
 ### Added
@@ -49,4 +57,5 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A body solver was considered and declined.** No host exposes a body, so it fails the boundary test this repository is built on; see [`docs/BOUNDARY.md`](docs/BOUNDARY.md). Planes, meshes, anchors and hit test are real platform sensing but feed placement and interaction rather than the environment, and are recorded there as a separate component rather than as slots of `EnvironmentSpec`.
 - Every slot the environment describes is a PLATFORM facility each host exposes differently - `scene.background` and `Fog` on three.js, `DomeGradient` and `AmbientLightComponent` on IWSDK. CONTENT is the app's: no geometry is created by either adapter, and the stock presets are examples to copy rather than art direction. See [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the boundary in full, and [`docs/UPSTREAM_ENHANCEMENTS.md`](docs/UPSTREAM_ENHANCEMENTS.md) for the gaps that belong to the other packages rather than this one.
 
+[0.1.1]: https://github.com/realitycollective/WebXR-Environment/compare/v0.1.0...development
 [0.1.0]: https://github.com/realitycollective/WebXR-Environment/releases/tag/v0.1.0

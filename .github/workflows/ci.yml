@@ -14,7 +14,9 @@
 #
 # Deploy:
 #   - production -> ONLY on push to `main` or a manual dispatch from `main`.
-#   - staging    -> ONLY on pull_request, into isolated `-test` projects.
+#   - staging    -> on pull_request and on pushes to development, into the
+#                   isolated `-test` project, always as its `staging` branch
+#                   so the project's root URL serves the latest build.
 #     A PR can never touch production.
 #
 # The deploy steps need the Cloudflare secrets and skip automatically when they
@@ -198,11 +200,15 @@ jobs:
             --mount "#scene-container"
 
   # ---------------------------------------------------------------------------
-  # STAGING - pull_request only. Publishes to the ISOLATED test project.
+  # STAGING - pull requests and pushes to development. Publishes to the
+  # ISOLATED test project, always as its production branch (`staging`), so the
+  # root URL (webxr-environment-test.pages.dev) serves the newest build. A
+  # per-PR branch name would only ever create pr-<n>.<project>.pages.dev
+  # aliases and leave the root a 404, which is what happened before.
   # ---------------------------------------------------------------------------
   deploy-staging:
     needs: build-test
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -256,7 +262,7 @@ jobs:
           command: >-
             pages deploy dist
             --project-name=webxr-environment-test
-            --branch=pr-${{ github.event.pull_request.number }}
+            --branch=staging
             --commit-dirty=true
 
       - name: Publish the staging URL
@@ -267,7 +273,7 @@ jobs:
           set -uo pipefail
           qrenc="$(jq -rn --arg u "$DEPLOY_URL" '$u|@uri')"
           {
-            echo "## Environment playground (STAGING - this PR only)"
+            echo "## Environment playground (STAGING - latest build)"
             echo ""
             echo "| | |"
             echo "| --- | --- |"

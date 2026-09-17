@@ -208,17 +208,19 @@ export class ThreeEnvironmentPort implements EnvironmentPort {
     this.#scene.backgroundIntensity = sky.intensity ?? 1;
     this.#scene.backgroundRotation.set(0, 0, 0);
     this.#scene.backgroundBlurriness = 0;
-    // A gradient's colours move every frame of a transition, so the texture is
-    // regenerated in place rather than reallocated.
-    if (this.#skyTexture === null) {
-      this.#skyTexture = createSkyTexture(sky, this.#skyResolution);
-    } else {
-      const refreshed = createSkyTexture(sky, this.#skyResolution);
-      this.#skyTexture.image.data = refreshed.image.data;
-      this.#skyTexture.needsUpdate = true;
-      refreshed.dispose();
-    }
+    // A gradient's colours move every frame of a transition. The texture is
+    // rebuilt and SWAPPED, not refilled in place: three.js turns an
+    // equirectangular background into a cube map once per texture object and
+    // keeps that cube map until the texture is disposed, so refilling the
+    // pixels and flagging `needsUpdate` re-uploads the 2D texture that nothing
+    // draws while the sky on screen stays at its first frame. Disposing the
+    // old texture is what drops the cached cube map. The texture is a few
+    // dozen rows, so the upload is cheap, and the cube conversion costs the
+    // same either way.
+    const previous = this.#skyTexture;
+    this.#skyTexture = createSkyTexture(sky, this.#skyResolution);
     this.#scene.background = this.#skyTexture;
+    previous?.dispose();
   }
 
   applyFog(fog: FogSpec | null): void {

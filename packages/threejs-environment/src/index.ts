@@ -42,6 +42,7 @@ export type {
   XrAnchorLike,
   XrFrameLike,
   XrHitTestResultLike,
+  XrInputSourceLike,
   XrLightEstimateLike,
   XrLightProbeLike,
   XrManagerLike,
