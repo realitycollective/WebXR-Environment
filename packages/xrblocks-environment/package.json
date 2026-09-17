@@ -1,0 +1,66 @@
+{
+  "name": "@realitycollective/xrblocks-environment",
+  "version": "0.1.0",
+  "description": "EXPERIMENTAL Google XR Blocks / plain three.js adapter for the Reality Collective WebXR Environment Extensions - drives sky, fog and lighting through the three.js adapter it builds on, and adds real-world depth occlusion and WebXR light estimation over an XR Blocks core.",
+  "keywords": [
+    "realitycollective",
+    "xrblocks",
+    "androidxr",
+    "webxr",
+    "threejs",
+    "xr",
+    "environment",
+    "depth-sensing",
+    "occlusion",
+    "light-estimation",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/threejs-environment": "^0.1.0",
+    "@realitycollective/webxr-environment": "^0.1.0"
+  },
+  "peerDependencies": {
+    "three": ">=0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "*",
+    "three": "npm:super-three@0.185.0",
+    "typescript": "^5.5.0",
+    "xrblocks": "^0.21.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Environment.git",
+    "directory": "packages/xrblocks-environment"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Environment#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Environment/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

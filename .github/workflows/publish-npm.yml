@@ -1,0 +1,357 @@
+# Manual release workflow - publishes to npmjs.com under the @realitycollective
+# scope, matching com.realitycollective.service-framework.ts.
+#
+# Nothing here depends on a sibling repository's package, so unlike
+# WebXR-Interactions there is no cross-repository publish order to observe:
+# the four packages in this workspace are self-contained.
+#
+# Behaviour depends on the branch you dispatch from:
+#
+#   development  -> publishes every package under the `preview` dist-tag, then
+#                   bumps the preview counter (e.g. 0.1.1-preview.0 -> 0.1.1-preview.1)
+#                   and pushes the bump back to development so the next run never collides.
+#
+#   main         -> publishes every package under the `latest` dist-tag, creates the
+#                   GitHub release/tag, then merges main into development and re-seeds it
+#                   to the next patch preview (e.g. main 0.1.0 -> development 0.1.1-preview.0)
+#                   to keep the branches aligned.
+#
+# Any other branch is rejected.
+#
+# Defaults to a DRY RUN: build + test + verify:pack + pack + upload the tarballs
+# as artifacts, with no registry push, no tag, no release and no version bump.
+# Re-run with dryRun=false to release for real.
+#
+# The run summary reports the version that was PUBLISHED. It reads a manifest
+# snapshotted at "Resolve release context", because by the time the summary runs
+# the working tree has moved on: a development run has already bumped every
+# package.json to the next preview, and a main run has checked development out.
+# Where a bump happened, the summary names the new development version separately
+# and says so - it is the next run's version, not this one's.
+#
+# NOTE: the development bump / re-seed steps push commits back to the repo using the
+# default GITHUB_TOKEN. If `main` or `development` is a protected branch that blocks
+# direct pushes, create a PAT with `contents: write`, add it as a secret (e.g. RELEASE_PAT),
+# and swap it into the `Checkout` step's `token:` input below.
+
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: "Dry run (build + pack + artifacts only - no publish, no tag, no version bump)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Validate branch
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" != "main" ] && [ "$BRANCH" != "development" ]; then
+            echo "::error::Publish is only supported from 'main' (latest) or 'development' (preview). Got '$BRANCH'."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history is required to merge main into development.
+          fetch-depth: 0
+          # token: ${{ secrets.RELEASE_PAT }}   # uncomment if main/development are protected
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Runs BEFORE install and build. Every check here is one this job used to
+      # make 15 minutes in, after a full gate had already been paid for.
+      - name: Resolve release context
+        id: ctx
+        run: |
+          set -euo pipefail
+          BRANCH="${{ github.ref_name }}"
+          CORE="$(node -p "require('./scripts/release.config.json').core")"
+          VERSION="$(node -p "require('./packages/${CORE}/package.json').version")"
+          case "$VERSION" in
+            *-*) IS_PRERELEASE=1 ;;
+            *)   IS_PRERELEASE=0 ;;
+          esac
+          if [ "$BRANCH" = "development" ]; then
+            if [ "$IS_PRERELEASE" != "1" ]; then
+              echo "::error::development must carry a prerelease version (found '$VERSION'). Run a main release first to seed the next preview."
+              exit 1
+            fi
+            TAG=preview
+          else
+            if [ "$IS_PRERELEASE" = "1" ]; then
+              echo "::error::main must carry a stable version (found prerelease '$VERSION')."
+              exit 1
+            fi
+            TAG=latest
+          fi
+
+          # Every package in the workspace ships one version. A package that has
+          # drifted means a stamp went wrong, and the publish loop would put a
+          # mixed set on the registry one package at a time, with no way back.
+          MISMATCH=0
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            pkg_version="$(node -p "require('./packages/$pkg/package.json').version")"
+            if [ "$pkg_version" != "$VERSION" ]; then
+              echo "::error::packages/$pkg carries $pkg_version but the core ($CORE) carries $VERSION. Re-stamp with 'node scripts/set-version.mjs --set $VERSION'."
+              MISMATCH=1
+            fi
+          done
+          [ "$MISMATCH" = "0" ] || exit 1
+
+          # A release whose tag already exists cannot be cut: every package is
+          # skipped as already published and the run dies at 'git tag'. That is a
+          # documented failure mode, so catch it here rather than after the build.
+          if [ "$BRANCH" = "main" ] && git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag v$VERSION already exists on origin, so $VERSION is already released. Stamp the next version; a published release is never retagged."
+            exit 1
+          fi
+
+          # Snapshot what this run will publish BEFORE anything can move it. The
+          # development bump rewrites every package.json and the main re-seed
+          # checks out a different branch, and both run before the summary - which
+          # is exactly why the summary must never re-read the working tree.
+          node -e '
+            const fs = require("node:fs");
+            const config = require("./scripts/release.config.json");
+            const rows = config.packages.map((dir) => {
+              const pkg = require(`./packages/${dir}/package.json`);
+              return { dir, name: pkg.name, version: pkg.version, status: "pending" };
+            });
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-manifest.json`, JSON.stringify(rows, null, 2));
+          '
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION from '$BRANCH' under dist-tag '$TAG'"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Verify the published artifact is consumable
+        run: npm run verify:pack -- --skip-build
+
+      # LICENSE and CHANGELOG live once at the repository root and are copied into
+      # every package at pack time, so each tarball carries both.
+      - name: Stage LICENSE and CHANGELOG into the packages
+        run: |
+          set -euo pipefail
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            cp LICENSE "packages/$pkg/LICENSE"
+            # An explicit `if`, NOT `[ -f x ] && cp`. A false test makes the
+            # && list return 1; the loop is the last command in this step, so
+            # that becomes the step's exit status and the job fails even
+            # though nothing went wrong.
+            if [ -f CHANGELOG.md ]; then
+              cp CHANGELOG.md "packages/$pkg/CHANGELOG.md"
+            fi
+          done
+
+      - name: Pack (always - the artifacts are the receipt)
+        run: |
+          set -euo pipefail
+          mkdir -p dist-tarballs
+          for pkg in $(node -p "require('./scripts/release.config.json').packages.join(' ')"); do
+            name="$(node -p "require('./packages/$pkg/package.json').name")"
+            npm pack --workspace "$name" --pack-destination dist-tarballs
+          done
+          ls -l dist-tarballs
+
+      - name: Upload tarball artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-tarballs
+          path: dist-tarballs/*.tgz
+          if-no-files-found: error
+
+      - name: Publish packages
+        if: ${{ inputs.dryRun == false }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_key }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ctx.outputs.tag }}"
+          MANIFEST="$RUNNER_TEMP/release-manifest.json"
+          # Driven by the manifest, not by a fresh read of the working tree, so the
+          # publish loop and the summary can never disagree about what was shipped.
+          COUNT="$(node -p "require('$MANIFEST').length")"
+          i=0
+          while [ "$i" -lt "$COUNT" ]; do
+            name="$(node -p "require('$MANIFEST')[$i].name")"
+            version="$(node -p "require('$MANIFEST')[$i].version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "Skipping $name@$version (already published)"
+              outcome=skipped
+            else
+              echo "Publishing $name@$version under dist-tag '$TAG'"
+              npm publish --workspace="$name" --access public --provenance --tag "$TAG"
+              outcome=published
+            fi
+            node -e '
+              const fs = require("node:fs");
+              const [file, index, outcome] = process.argv.slice(1);
+              const rows = JSON.parse(fs.readFileSync(file, "utf8"));
+              rows[Number(index)].status = outcome;
+              fs.writeFileSync(file, JSON.stringify(rows, null, 2));
+            ' "$MANIFEST" "$i" "$outcome"
+            i=$((i + 1))
+          done
+
+      # --- development: bump the preview counter so the next run can't collide ---
+      # This step rewrites every package.json to the NEXT preview. Nothing after it
+      # may read a version out of the working tree and call it the published one.
+      - name: Bump development preview version
+        id: bump
+        if: ${{ inputs.dryRun == false && github.ref_name == 'development' }}
+        run: |
+          set -euo pipefail
+          NEW_VERSION="$(node scripts/set-version.mjs --bump)"
+          npm install --package-lock-only
+          git add -- package-lock.json README.md packages/*/package.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "chore(release): bump preview to v$NEW_VERSION [skip ci]"
+            git push origin "HEAD:development"
+            echo "development bumped to $NEW_VERSION"
+          fi
+          echo "next=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      # --- main: cut the GitHub release, then realign development ---
+      - name: Create GitHub release
+        if: ${{ inputs.dryRun == false && github.ref_name == 'main' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="v${{ steps.ctx.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --title "$VERSION" --generate-notes dist-tarballs/*.tgz
+
+      # This step checks out development and bumps it, so from here the working
+      # tree is neither the released commit nor the released version.
+      - name: Refresh development from main and seed next preview
+        id: reseed
+        if: ${{ inputs.dryRun == false && github.ref_name == 'main' }}
+        run: |
+          set -euo pipefail
+          RELEASED="v${{ steps.ctx.outputs.version }}"
+          git fetch origin main
+          if git ls-remote --exit-code --heads origin development >/dev/null 2>&1; then
+            git fetch origin development
+            git checkout -B development origin/development
+            # Merge the released main into development. The version/lockfile/README always
+            # conflict (both branches touch them) - we take main's copy of those and re-stamp
+            # the next preview below. Any OTHER conflict is a real source divergence, so fail
+            # loudly rather than silently clobbering development work.
+            git merge --no-commit --no-ff origin/main || true
+            git checkout --theirs -- package-lock.json README.md packages/*/package.json 2>/dev/null || true
+            git add -- package-lock.json README.md packages/*/package.json 2>/dev/null || true
+            if [ -n "$(git ls-files -u)" ]; then
+              echo "::error::Unresolved conflicts merging main into development (resolve manually):"
+              git ls-files -u
+              exit 1
+            fi
+          else
+            echo "No development branch yet; creating it from main."
+            git checkout -B development origin/main
+          fi
+          # set-version --bump always changes the version, so there is always something to
+          # commit; mid-merge this commit also finalises the merge.
+          NEW_VERSION="$(node scripts/set-version.mjs --bump)"
+          npm install --package-lock-only
+          git add -- package-lock.json README.md packages/*/package.json
+          git commit -m "chore(release): seed development preview v$NEW_VERSION after $RELEASED [skip ci]"
+          git push origin "HEAD:development"
+          echo "development re-seeded to $NEW_VERSION"
+          echo "next=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      # Reads the manifest written before the publish, NEVER the working tree. The
+      # tree at this point carries the next preview version (development) or sits on
+      # a different branch entirely (main), so reporting it named the wrong release.
+      - name: Summary
+        if: always()
+        env:
+          DRY: ${{ inputs.dryRun }}
+          TAG: ${{ steps.ctx.outputs.tag }}
+          RELEASED: ${{ steps.ctx.outputs.version }}
+          NEXT_PREVIEW: ${{ steps.bump.outputs.next || steps.reseed.outputs.next }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          MANIFEST="$RUNNER_TEMP/release-manifest.json"
+          if [ ! -f "$MANIFEST" ]; then
+            {
+              echo "## $REPO_NAME publish"
+              echo ""
+              echo "Nothing was published: the run failed before it resolved a release version."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## $REPO_NAME publish"
+            echo ""
+            echo "Dispatched from \`$BRANCH\`."
+            echo ""
+            echo "| package | version published | dist-tag | result |"
+            echo "| --- | --- | --- | --- |"
+            node -e '
+              const [file, dry, tag] = process.argv.slice(1);
+              const rows = require(file);
+              const label = {
+                published: "published",
+                skipped: "already on npm, skipped",
+                pending: dry === "true" ? "dry run, not published" : "not reached",
+              };
+              for (const row of rows) {
+                console.log(`| \`${row.name}\` | \`${row.version}\` | \`${tag}\` | ${label[row.status]} |`);
+              }
+            ' "$MANIFEST" "$DRY" "$TAG"
+            echo ""
+            if [ "$DRY" = "true" ]; then
+              echo "**DRY RUN** - packed and verified but not published. Re-run with \`dryRun=false\` to publish to npmjs.com."
+            else
+              echo "Released **$RELEASED** to npmjs.com under dist-tag \`$TAG\`."
+              if [ -n "$NEXT_PREVIEW" ]; then
+                echo ""
+                echo "\`development\` was then moved on to **$NEXT_PREVIEW**. That is what the NEXT run will publish, not what this one did."
+              fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

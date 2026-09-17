@@ -1,0 +1,36 @@
+{
+  "core": "webxr-environment",
+  "packages": [
+    "webxr-environment",
+    "threejs-environment",
+    "iwsdk-environment",
+    "xrblocks-environment"
+  ],
+  "importCheck": [
+    "webxr-environment"
+  ],
+  "declarationCheck": true,
+  "preid": "preview",
+  "legacyPeerDeps": true,
+  "prebundle": {
+    "bundlers": [
+      {
+        "id": "vite7",
+        "package": "vite-7",
+        "detectsStarHops": true
+      },
+      {
+        "id": "vite8",
+        "package": "vite-8",
+        "detectsStarHops": false
+      }
+    ],
+    "packages": {
+      "iwsdk-environment": {
+        "hosts": [
+          "@iwsdk/core"
+        ]
+      }
+    }
+  }
+}

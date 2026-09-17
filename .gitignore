@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test output
+coverage/
+*.lcov
+
+# Output of `npm pack`
+*.tgz
+dist-tarballs/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / tooling
+.vscode/
+.idea/
+.DS_Store
+
+# Agent tooling - never commit to this repository
+.claude/
+
+# LICENSE and CHANGELOG are copied into each package at pack time
+# (see the publish workflow and scripts/verify-pack.mjs)
+packages/*/LICENSE
+packages/*/CHANGELOG.md
