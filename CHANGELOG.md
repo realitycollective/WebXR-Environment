@@ -4,7 +4,7 @@ Change log for the Reality Collective WebXR Environment Extensions packages. All
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
-## [0.1.0]
+## [0.1.0] - 2026-09-17
 
 ### Added
 
@@ -49,4 +49,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A body solver was considered and declined.** No host exposes a body, so it fails the boundary test this repository is built on; see [`docs/BOUNDARY.md`](docs/BOUNDARY.md). Planes, meshes, anchors and hit test are real platform sensing but feed placement and interaction rather than the environment, and are recorded there as a separate component rather than as slots of `EnvironmentSpec`.
 - Every slot the environment describes is a PLATFORM facility each host exposes differently - `scene.background` and `Fog` on three.js, `DomeGradient` and `AmbientLightComponent` on IWSDK. CONTENT is the app's: no geometry is created by either adapter, and the stock presets are examples to copy rather than art direction. See [`docs/BOUNDARY.md`](docs/BOUNDARY.md) for the boundary in full, and [`docs/UPSTREAM_ENHANCEMENTS.md`](docs/UPSTREAM_ENHANCEMENTS.md) for the gaps that belong to the other packages rather than this one.
 
-[0.1.0]: https://github.com/realitycollective/WebXR-Environment/commits/main
+[0.1.0]: https://github.com/realitycollective/WebXR-Environment/releases/tag/v0.1.0
