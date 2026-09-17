@@ -8,9 +8,11 @@
 //       whether the next tag is free, and what the registry serves. Read-only.
 //
 //   node scripts/release.mjs prepare [--version X.Y.Z]
-//       Cuts release/X.Y.Z from development, drops the preview suffix, regenerates
-//       the lockfile, dates the changelog, runs the full gate, then STOPS and asks
-//       before it commits, pushes and opens the pull request.
+//       Runs the full gate on development as it stands, then cuts release/X.Y.Z,
+//       drops the preview suffix, regenerates the lockfile, dates the changelog,
+//       and STOPS and asks before it commits, pushes and opens the pull request.
+//       The gate runs first so a failing build or test costs nothing to undo:
+//       no branch has been cut and no file has been stamped.
 //
 // Publishing is NOT here. Both the preview publish and the release publish are the
 // "Publish to npm" GitHub Action, dispatched once with dryRun ticked and once
@@ -310,14 +312,9 @@ async function cmdPrepare() {
   log(`  releasing            ${version}`);
   log(`  on branch            ${branch}`);
 
-  step(`Cutting ${branch} and stamping ${version}`);
-  gitLive("checkout", "-b", branch);
-  exec("node", [join("scripts", "set-version.mjs"), "--set", version]);
-  exec("npm", ["install", "--package-lock-only"]);
-
-  step("Dating the changelog");
-  stampChangelog(version, new Date().toISOString().slice(0, 10));
-
+  // The gate runs before the branch is cut. Nothing it checks depends on the
+  // stamp: set-version only rewrites version strings, and verify:pack names its
+  // tarballs from them. Failing here leaves the tree exactly as it was found.
   if (skipGate) {
     step("Gate skipped (--no-gate)");
   } else {
@@ -328,10 +325,18 @@ async function cmdPrepare() {
     exec("npm", ["run", "verify:pack"]);
   }
 
+  step(`Cutting ${branch} and stamping ${version}`);
+  gitLive("checkout", "-b", branch);
+  exec("node", [join("scripts", "set-version.mjs"), "--set", version]);
+  exec("npm", ["install", "--package-lock-only"]);
+
+  step("Dating the changelog");
+  stampChangelog(version, new Date().toISOString().slice(0, 10));
+
   step("Ready to release");
   log(exec("git", ["status", "--short"], { capture: true, raw: true }).out);
   log("");
-  log(`  ${config.packages.length} package(s) stamped ${version}, changelog dated, lockfile regenerated.`);
+  log(`  Gate passed on development; ${config.packages.length} package(s) stamped ${version}, changelog dated, lockfile regenerated.`);
   log(`  Nothing has left this machine yet.`);
   log("");
   log("  This is the manual check. Read the diff, and where the repository has a");
