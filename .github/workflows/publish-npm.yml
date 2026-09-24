@@ -22,6 +22,10 @@
 # as artifacts, with no registry push, no tag, no release and no version bump.
 # Re-run with dryRun=false to release for real.
 #
+# CI queues a dry run of this workflow by itself after a pull request merges
+# into main or development and CI passes on the merge. A real release is
+# always dispatched by hand.
+#
 # The run summary reports the version that was PUBLISHED. It reads a manifest
 # snapshotted at "Resolve release context", because by the time the summary runs
 # the working tree has moved on: a development run has already bumped every
@@ -35,6 +39,11 @@
 # and swap it into the `Checkout` step's `token:` input below.
 
 name: Publish to npm
+
+# The title each run gets in the Actions list. It is fixed at dispatch, before
+# checkout, so it can name the mode and the branch but not the version. The
+# version is in the run's Summary.
+run-name: "${{ inputs.dryRun && 'Dry run' || 'RELEASE' }} - ${{ github.ref_name }}"
 
 on:
   workflow_dispatch:
@@ -50,6 +59,7 @@ concurrency:
 
 jobs:
   publish:
+    name: "${{ inputs.dryRun && 'Dry run' || 'Release' }} from ${{ github.ref_name }}"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

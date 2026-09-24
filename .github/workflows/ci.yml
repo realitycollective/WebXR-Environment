@@ -24,6 +24,11 @@
 #   - CLOUDFLARE_API_TOKEN   (token with "Cloudflare Pages: Edit")
 #   - CLOUDFLARE_ACCOUNT_ID
 
+# Dry run:
+#   - after a pull request merges into `main` or `development` and every job
+#     above passes on the merge, queue-dry-run dispatches "Publish to npm"
+#     on that branch with dryRun ticked. A direct push queues nothing.
+
 name: CI
 
 on:
@@ -308,3 +313,48 @@ jobs:
             "${{ steps.deploy.outputs.deployment-url }}" \
             --mount "#scene-container"
 
+  # ---------------------------------------------------------------------------
+  # DRY RUN - after a merged pull request, queue "Publish to npm" with dryRun
+  # ticked on the branch it merged into. It waits for every job above and runs
+  # only when none failed. A direct push to the branch queues nothing, because
+  # releases are cut from pull requests. The publish run itself is still
+  # dispatched by hand when it is for real.
+  # ---------------------------------------------------------------------------
+  queue-dry-run:
+    name: Queue publish dry run
+    needs: [build-test, deploy-production, deploy-staging]
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && github.event_name == 'push'
+      && (github.ref_name == 'main' || github.ref_name == 'development')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      # GITHUB_TOKEN cannot trigger most workflows, but workflow_dispatch is
+      # the documented exception, so no extra secret is needed.
+      - name: Dispatch the dry run if this push merged a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PR="$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"$BRANCH\")][0].number // empty")"
+          if [ -z "$PR" ]; then
+            echo "$SHA on $BRANCH is not a merged pull request. No dry run queued."
+            exit 0
+          fi
+          gh workflow run publish-npm.yml --repo "$REPO" --ref "$BRANCH" -f dryRun=true
+          {
+            echo "## Publish dry run queued"
+            echo ""
+            echo "PR #$PR merged into \`$BRANCH\`, so a dry run of **Publish to npm** was dispatched on \`$BRANCH\`."
+            echo "Find it in [Publish to npm](https://github.com/$REPO/actions/workflows/publish-npm.yml?query=branch%3A$BRANCH)."
+          } >> "$GITHUB_STEP_SUMMARY"

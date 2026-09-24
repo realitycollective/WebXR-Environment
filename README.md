@@ -1,5 +1,10 @@
 # WebXR Environment
 
+| Branch | Build | Publish | Published on npm |
+| --- | --- | --- | --- |
+| `main` | [![main build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/ci.yml?branch=main&label=build)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/ci.yml?query=branch%3Amain) | [![main publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/publish-npm.yml?branch=main&label=publish)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/publish-npm.yml?query=branch%3Amain) | [![npm latest](https://img.shields.io/npm/v/@realitycollective/webxr-environment/latest?label=npm%20latest)](https://www.npmjs.com/package/@realitycollective/webxr-environment?activeTab=versions) |
+| `development` | [![development build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/ci.yml?branch=development&label=build)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/ci.yml?query=branch%3Adevelopment) | [![development publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/publish-npm.yml?branch=development&label=publish)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/publish-npm.yml?query=branch%3Adevelopment) | [![npm preview](https://img.shields.io/npm/v/@realitycollective/webxr-environment/preview?label=npm%20preview)](https://www.npmjs.com/package/@realitycollective/webxr-environment?activeTab=versions) |
+
 WebXR Environment describes the world **around** the player - the sky, the fog, the light - and the **sound** in it, as plain data, and applies that description through a thin adapter for whichever engine is hosting.
 
 Every one of those is a **platform facility** that each host exposes differently: 
@@ -175,8 +180,8 @@ Two workflows ship in every Reality Collective TypeScript repository, with the s
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-environment-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate |
-| `publish-npm.yml` | manual dispatch | packs all three packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
+| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-environment-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate. After a merged PR passes, it queues a publish dry run on the branch the PR merged into |
+| `publish-npm.yml` | manual dispatch, plus the dry run CI queues after a merged PR | packs all three packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
 
 ## Releasing
 

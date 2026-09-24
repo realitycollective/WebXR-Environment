@@ -378,8 +378,8 @@ async function cmdPrepare() {
     `- \`CHANGELOG.md\` heading dated and its link pointed at \`${tag}\``,
     "",
     "Merging this deploys production where the repository has a Cloudflare project.",
-    "Once it has landed, publish from Actions -> Publish to npm, branch `main`:",
-    "once with dryRun ticked, then again with it unticked.",
+    "Once it has landed and CI passes, CI queues a dry run of Publish to npm on `main`.",
+    "Read its summary, then dispatch Publish to npm from `main` with dryRun unticked.",
   ].join("\n");
   exec("gh", [
     "pr",
@@ -395,9 +395,9 @@ async function cmdPrepare() {
   ]);
 
   step("Next");
-  log("  Merge the pull request once CI is green, then publish it the usual way:");
-  log("    Actions -> Publish to npm -> branch main, dryRun ticked");
-  log("    read the summary, then re-run with dryRun unticked");
+  log("  Merge the pull request once CI is green. CI on main then queues the dry run:");
+  log("    Actions -> Publish to npm -> \"Dry run - main\", read its summary");
+  log("    then dispatch Publish to npm from main with dryRun unticked");
   log("  Afterwards, collect the re-seed commit: git checkout development && git pull");
 }
 
