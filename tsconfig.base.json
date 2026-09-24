@@ -23,7 +23,8 @@
       "@realitycollective/webxr-environment": ["./packages/webxr-environment/src/index.ts"],
       "@realitycollective/threejs-environment": ["./packages/threejs-environment/src/index.ts"],
       "@realitycollective/iwsdk-environment": ["./packages/iwsdk-environment/src/index.ts"],
-      "@realitycollective/xrblocks-environment": ["./packages/xrblocks-environment/src/index.ts"]
+      "@realitycollective/xrblocks-environment": ["./packages/xrblocks-environment/src/index.ts"],
+      "@realitycollective/native-environment": ["./packages/native-environment/src/index.ts"]
     }
   }
 }

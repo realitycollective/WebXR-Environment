@@ -1,0 +1,57 @@
+{
+  "name": "@realitycollective/native-environment",
+  "version": "0.1.1-preview.0",
+  "description": "Native host adapter for the Reality Collective WebXR Environment Extensions - reads the environment, audio and sensing slices of globalThis.__rcHost that a native app (OpenXR, visionOS) installs, and forwards the engine-free @realitycollective/webxr-environment core's ports to it as plain data. No asset decoding here: a sky, an environment map or an audio cue crosses as a src string the native app resolves itself. Re-exports the core.",
+  "keywords": [
+    "realitycollective",
+    "native",
+    "openxr",
+    "visionos",
+    "webxr",
+    "xr",
+    "environment",
+    "skybox",
+    "fog",
+    "lighting",
+    "audio",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "Reality Collective",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@realitycollective/webxr-environment": "^0.1.1-preview.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realitycollective/WebXR-Environment.git",
+    "directory": "packages/native-environment"
+  },
+  "homepage": "https://github.com/realitycollective/WebXR-Environment#readme",
+  "bugs": {
+    "url": "https://github.com/realitycollective/WebXR-Environment/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19.0 <21.0.0-0 || >=22.12.0 <23.0.0-0 || >=24.0.0"
+  }
+}

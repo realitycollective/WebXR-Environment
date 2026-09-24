@@ -1,10 +1,15 @@
 # Changelog
 
-Change log for the Reality Collective WebXR Environment Extensions packages. All four packages are versioned and released together; the version below is the one carried by the `v<version>` release tag.
+Change log for the Reality Collective WebXR Environment Extensions packages. All five packages are versioned and released together; the version below is the one carried by the `v<version>` release tag.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
 ## [0.1.1]
+
+### Added
+
+- `@realitycollective/webxr-environment` - `environmentPortContractCases()`, `audioPortContractCases()` and `worldSensingPortContractCases()`, the shared `EnvironmentPort` / `AudioPort` / `WorldSensingPort` conformance suites, shipped as data rather than as tests, in the style of `webxr-uiextensions`'s `contract-cases.ts`. Each case is a `name` plus a `run(subject)` that throws a plain `Error` on failure, so an adapter runs it in its own test runner. They check what the core relies on and nothing more: every sky, fog, ambient, key and IBL variant applies without throwing; a port that senses answers a request through `observe` with a report naming a known feature and state; a one-shot voice's `ended` runs exactly once and a stopped voice is never driven to end afterwards; a world-sensing port's `createAnchor` never rejects and its `stopHitTest` / `removeAnchor` tolerate an unknown id. All four platforms - `threejs-`, `iwsdk-`, `xrblocks-environment` and `native-environment` - now run all three suites, and all four already passed every case. `contract-cases.ts` is inside the core's 100% coverage gate.
+- `@realitycollective/native-environment` - the native host adapter, for an app that embeds a JavaScript engine such as Hermes over OpenXR or CompositorServices, owns rendering and audio itself, and installs `globalThis.__rcHost`. `NativeEnvironmentPort`, `NativeAudioPort` and `NativeWorldSensingPort` forward every slot, request and callback to the host's `environment`, `audio` and `sensing` slices as plain data, deciding nothing: a `src` string is resolved and decoded entirely by the native app, and depth occlusion, light estimation and world sensing are grown on the port only when the host implements them, so the director's own "the port does not have this" reporting is what an app sees. Audio keeps every voice's `ended` callback in JavaScript, keyed by `voiceId`, because a callback the core hands to a port cannot itself cross this boundary. `environment` and `audio` are required by the port that reads them and throw, naming the slice, when neither an injected host nor `globalThis.__rcHost` has one; `sensing` is genuinely optional and is instead reported `unsupported`.
 
 ### Fixed
 
