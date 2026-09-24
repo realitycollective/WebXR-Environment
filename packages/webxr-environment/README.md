@@ -61,6 +61,22 @@ director.apply({ fog: clearedFog(DUSK.fog!) });          // present, but invisib
 director.transition({ fog: DUSK.fog! }, { durationMs: 4000 });  // rolls in
 ```
 
+## Proving a new adapter conforms
+
+`environmentPortContractCases()`, `audioPortContractCases()` and `worldSensingPortContractCases()` are the `EnvironmentPort`, `AudioPort` and `WorldSensingPort` conformance suites, shipped as data rather than as tests. Each case is a `name` plus a `run(subject)` that returns silently on success and throws an `Error` describing the failure otherwise, so an adapter runs them in whatever test runner it already has. They ship runner-free because an adapter written outside this repository cannot reach into this one's `test/` folder.
+
+An adapter's test file is a loop:
+
+```ts
+import { environmentPortContractCases } from '@realitycollective/webxr-environment';
+
+for (const contractCase of environmentPortContractCases()) {
+  it(contractCase.name, () => contractCase.run({ port: makeMyEnvironmentPort() }));
+}
+```
+
+`makeMyEnvironmentPort()` (or the audio/world-sensing equivalent) runs once per case, because a case applies slots or starts voices and does not clean up after itself. The audio suite also takes a `driver`: something with `end(voiceId)` that makes the host finish a voice as though it stopped on its own, which is how the suite checks a one-shot's `ended` fires exactly once without depending on your engine's timing. `threejs-`, `iwsdk-`, `xrblocks-environment` and `native-environment` all run all three suites - `xrblocks-environment`'s audio suite runs against what `createXRBlocksAudio` returns, since that adapter reuses `ThreeAudioPort` outright - so a case failing on yours is a real difference in behaviour, not a difference in test style.
+
 ## Licence
 
 MIT. Part of the [Reality Collective](https://github.com/realitycollective) WebXR stack.

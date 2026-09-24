@@ -43,21 +43,28 @@ export interface EnvironmentPort {
   /**
    * Turn real-world depth occlusion on, or off with `null`.
    *
-   * OPTIONAL, because a host without depth is a host that has nothing to
-   * implement here - and because the director only calls it while passthrough
-   * is on, a port that never sees it is not necessarily a port on a device
-   * without depth. Report through {@link observe} rather than throwing.
+   * OPTIONAL, because a port that cannot do occlusion at all leaves this
+   * method off entirely: the director sees it is missing and reports
+   * `unsupported` on its own, so there is nothing left for the port to say. A
+   * port that HAS this method reports what happens through {@link observe}
+   * instead - `pending` once the request is accepted, `active` once it is
+   * working, and `unavailable` with a detail when its runtime cannot deliver
+   * it right now. The director only calls this while passthrough is on, so a
+   * port that never sees it is not necessarily a port on a device without
+   * depth.
    */
   applyOcclusion?(spec: OcclusionSpec | null): void;
 
   /**
    * Start or stop light estimation, with every default already resolved.
    *
-   * A port that implements this reports what happens through {@link observe}:
-   * `pending` once the runtime accepted the request, `active` with each
-   * estimate, `unavailable` when the session did not grant it. A port that
-   * does not implement it should report `unsupported` from `observe`, so the
-   * absence is visible instead of silent.
+   * OPTIONAL, because a port that cannot do light estimation at all leaves
+   * this method off entirely: the director sees it is missing and reports
+   * `unsupported` on its own, so there is nothing left for the port to say. A
+   * port that HAS this method reports what happens through {@link observe}
+   * instead - `pending` once the runtime accepted the request, `active` with
+   * each estimate, and `unavailable` with a detail when its runtime cannot
+   * deliver one right now.
    */
   applyLightEstimation?(estimation: ResolvedLightEstimation | null): void;
 

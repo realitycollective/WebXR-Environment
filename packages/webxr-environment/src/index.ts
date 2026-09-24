@@ -127,3 +127,18 @@ export {
   STOCK_PRESETS,
   VOID,
 } from "./presets.js";
+
+export type {
+  AudioPortContractCase,
+  AudioPortContractDriver,
+  AudioPortContractSubject,
+  EnvironmentPortContractCase,
+  EnvironmentPortContractSubject,
+  WorldSensingPortContractCase,
+  WorldSensingPortContractSubject,
+} from "./contract-cases.js";
+export {
+  audioPortContractCases,
+  environmentPortContractCases,
+  worldSensingPortContractCases,
+} from "./contract-cases.js";
