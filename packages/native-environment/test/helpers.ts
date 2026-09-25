@@ -1,5 +1,5 @@
 /**
- * In-memory fakes for the three slices this package reads.
+ * In-memory fakes for the four slices this package reads.
  *
  * Each fake is the whole slice, so a test can hand one straight to a port's
  * constructor - the same "injected, for tests" path a real app uses to avoid
@@ -9,18 +9,23 @@
  * drive both sides.
  */
 import { vi } from "vitest";
-import type {
-  EstimatedLighting,
-  SensingReport,
-  WorldAnchor,
-  WorldHit,
-  WorldMesh,
-  WorldPlane,
+import {
+  SCENE_CONTRACT_FIXTURES,
+  type EstimatedLighting,
+  type SceneContractFixtures,
+  type SensingReport,
+  type Vec3,
+  type WorldAnchor,
+  type WorldHit,
+  type WorldMesh,
+  type WorldPlane,
+  type WorldPose,
 } from "@realitycollective/webxr-environment";
 import type {
   NativeAudioHost,
   NativeAudioVoiceRequest,
   NativeEnvironmentHost,
+  NativeScenesHost,
   NativeSensingHost,
 } from "../src/native-types.js";
 
@@ -206,6 +211,156 @@ export function createFakeSensingHost(options: FakeSensingHostOptions = {}): Fak
       sensingListeners.add(callback);
       return () => {
         sensingListeners.delete(callback);
+      };
+    });
+  }
+  return host;
+}
+
+export interface FakeScenesHostOptions {
+  /** What each `src` builds. Default: the shared contract fixtures. */
+  readonly fixtures?: SceneContractFixtures;
+  readonly onBuildProgress?: boolean;
+}
+
+/** One node the fake native app holds, by its key. */
+export interface FakeNativeNode {
+  readonly key: string;
+  readonly id: string;
+  /** The owning scene's key, or `null` once `detachNode` moved it out. */
+  scene: string | null;
+  /** The parent node's key, or `null` for a node directly in its scene. */
+  readonly parent: string | null;
+  readonly position: Vec3;
+  active: boolean;
+  destroyed: boolean;
+}
+
+export interface FakeScenesHost extends NativeScenesHost {
+  readonly nodes: Map<string, FakeNativeNode>;
+  readonly scenes: Map<string, { visible: boolean; destroyed: boolean }>;
+  /** What the native app renders and hit-tests right now. */
+  isShown(key: string): boolean;
+  /** Everything the app has built and not yet removed: scenes and nodes. */
+  liveCount(): number;
+  emitBuildProgress(sceneId: string, progress: number): void;
+}
+
+/**
+ * A native app's `scenes` slice, in memory. Builds each `src` from the
+ * fixtures, keys every scene and node, and keeps world positions as given.
+ * A node is shown while it and every node above it are active and its scene
+ * is visible; a detached node belongs to no scene and is shown while active.
+ */
+export function createFakeScenesHost(options: FakeScenesHostOptions = {}): FakeScenesHost {
+  const fixtures = options.fixtures ?? SCENE_CONTRACT_FIXTURES;
+  const progressListeners = new Set<(sceneId: string, progress: number) => void>();
+  const nodes = new Map<string, FakeNativeNode>();
+  const scenes = new Map<string, { visible: boolean; destroyed: boolean }>();
+  let next = 1;
+  const key = (label: string) => `${label}:${String(next++)}`;
+  const destroyTree = (target: string) => {
+    for (const entry of nodes.values()) {
+      if (entry.key === target || entry.parent === target) {
+        if (!entry.destroyed && entry.key !== target) destroyTree(entry.key);
+        entry.destroyed = true;
+      }
+    }
+  };
+
+  const host: FakeScenesHost = {
+    nodes,
+    scenes,
+    async build(def, visible) {
+      const fixture = fixtures.scenes[def.src];
+      if (fixture === undefined) throw new Error(`no scene at ${def.src}`);
+      for (let turn = 0; turn < (fixture.turns ?? 0); turn += 1) await Promise.resolve();
+      if (fixture.fail === true) throw new Error(`${def.src} failed to build`);
+      const scene = key(`scene/${def.id}`);
+      scenes.set(scene, { visible, destroyed: false });
+      const built = fixture.nodes.map((entry) => {
+        const node: FakeNativeNode = {
+          key: key(`node/${entry.id}`),
+          id: entry.id,
+          scene,
+          parent: null,
+          position: [...entry.position],
+          active: true,
+          destroyed: false,
+        };
+        nodes.set(node.key, node);
+        return { id: entry.id, key: node.key };
+      });
+      return { scene, nodes: built };
+    },
+    setVisible: vi.fn((scene: string, visible: boolean) => {
+      const entry = scenes.get(scene);
+      if (entry !== undefined) entry.visible = visible;
+    }),
+    destroy: vi.fn((scene: string) => {
+      const entry = scenes.get(scene);
+      if (entry !== undefined) entry.destroyed = true;
+      for (const node of nodes.values()) if (node.scene === scene) node.destroyed = true;
+    }),
+    setNodeActive: vi.fn((node: string, active: boolean) => {
+      const entry = nodes.get(node);
+      if (entry !== undefined) entry.active = active;
+    }),
+    instantiate: vi.fn((asset: string, pose: WorldPose, scene: string, parent: string | null) => {
+      if (!fixtures.assets.includes(asset)) throw new Error(`no asset ${asset}`);
+      const node: FakeNativeNode = {
+        key: key(`instance/${asset}`),
+        id: asset,
+        scene: parent === null ? scene : (nodes.get(parent)?.scene ?? scene),
+        parent,
+        position: [...pose.position],
+        active: true,
+        destroyed: false,
+      };
+      nodes.set(node.key, node);
+      return node.key;
+    }),
+    destroyInstance: vi.fn((instance: string) => destroyTree(instance)),
+    detachNode: vi.fn((_scene: string, node: string) => {
+      const detach = (target: string) => {
+        const entry = nodes.get(target);
+        if (entry === undefined) return;
+        entry.scene = null;
+        for (const child of nodes.values()) if (child.parent === target) detach(child.key);
+      };
+      detach(node);
+    }),
+    destroyNode: vi.fn((node: string) => destroyTree(node)),
+    isShown(target) {
+      let entry = nodes.get(target);
+      if (entry === undefined || entry.destroyed) return false;
+      for (;;) {
+        if (!entry.active) return false;
+        if (entry.parent === null) break;
+        const parent = nodes.get(entry.parent);
+        if (parent === undefined) break;
+        entry = parent;
+      }
+      if (entry.scene === null) return true;
+      const scene = scenes.get(entry.scene);
+      return scene !== undefined && scene.visible && !scene.destroyed;
+    },
+    liveCount() {
+      let count = 0;
+      for (const scene of scenes.values()) if (!scene.destroyed) count += 1;
+      for (const node of nodes.values()) if (!node.destroyed) count += 1;
+      return count;
+    },
+    emitBuildProgress(sceneId, progress) {
+      for (const listener of progressListeners) listener(sceneId, progress);
+    },
+  };
+
+  if (options.onBuildProgress ?? true) {
+    host.onBuildProgress = vi.fn((callback) => {
+      progressListeners.add(callback);
+      return () => {
+        progressListeners.delete(callback);
       };
     });
   }

@@ -19,23 +19,38 @@
 import type {
   AudioDirectorOptions,
   EnvironmentDirectorOptions,
+  SceneManagerOptions,
   WorldSensingDirectorOptions,
 } from "@realitycollective/webxr-environment";
-import { AudioDirector, EnvironmentDirector, WorldSensingDirector } from "@realitycollective/webxr-environment";
+import {
+  AudioDirector,
+  EnvironmentDirector,
+  SceneManager,
+  WorldSensingDirector,
+} from "@realitycollective/webxr-environment";
 import { NativeAudioPort } from "./audio-port.js";
 import { NativeEnvironmentPort } from "./environment-port.js";
 import { NativeWorldSensingPort } from "./world-sensing-port.js";
-import type { NativeAudioHost, NativeEnvironmentHost, NativeSensingHost } from "./native-types.js";
+import { NativeScenePort } from "./scene-port.js";
+import type {
+  NativeAudioHost,
+  NativeEnvironmentHost,
+  NativeScenesHost,
+  NativeSensingHost,
+} from "./native-types.js";
 
 export type {
   NativeAudioHost,
   NativeAudioVoiceRequest,
+  NativeBuiltScene,
   NativeEnvironmentHost,
+  NativeScenesHost,
   NativeSensingHost,
 } from "./native-types.js";
 export { NativeEnvironmentPort } from "./environment-port.js";
 export { NativeAudioPort } from "./audio-port.js";
 export { NativeWorldSensingPort } from "./world-sensing-port.js";
+export { NativeScenePort } from "./scene-port.js";
 
 export * from "@realitycollective/webxr-environment";
 
@@ -101,4 +116,25 @@ export function createNativeWorldSensing(
 ): NativeWorldSensingSetup {
   const port = new NativeWorldSensingPort(host);
   return { director: new WorldSensingDirector(port, options), port };
+}
+
+export interface NativeScenesSetup {
+  readonly manager: SceneManager<string, string>;
+  readonly port: NativeScenePort;
+}
+
+/**
+ * Wire a scene manager to the native host's `scenes` slice. Nodes are the
+ * app's own keys, the same ones it uses as target ids in the `interactions`
+ * slice. Pass `environment` to let the active scene drive a director.
+ *
+ * Throws at construction when the host has no `scenes` slice - see
+ * `getScenesHost`.
+ */
+export function createNativeScenes(
+  host?: NativeScenesHost,
+  options: SceneManagerOptions = {},
+): NativeScenesSetup {
+  const port = new NativeScenePort(host);
+  return { manager: new SceneManager(port, options), port };
 }

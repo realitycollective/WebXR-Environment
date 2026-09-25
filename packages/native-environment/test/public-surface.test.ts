@@ -13,9 +13,11 @@ describe("native-environment public surface", () => {
     expect(added).toEqual([
       "NativeAudioPort",
       "NativeEnvironmentPort",
+      "NativeScenePort",
       "NativeWorldSensingPort",
       "createNativeAudio",
       "createNativeEnvironment",
+      "createNativeScenes",
       "createNativeWorldSensing",
     ]);
   });

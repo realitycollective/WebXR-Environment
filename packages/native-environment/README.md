@@ -37,14 +37,32 @@ host.onFrame((_, deltaS) => director.update(deltaS * 1000));
 - **Sensing reports and light estimates** arrive by subscribing to the host's own `onSensingReport` / `onLightEstimate`, when it has them, and forwarding each one to the director unread. The **native app** decides what `active` or `unavailable` means on its platform; this package does not interpret device state.
 - **Audio** keeps every voice's `ended` callback in JavaScript, keyed by `voiceId`, because a callback the CORE hands to a port cannot cross this boundary - only a listener callback the host itself calls can. `start` sends the host a request with `ended` removed; the callback runs once, when `onVoiceEnded` names that id, and `stop` never reaches the host for a voice that already has.
 - **World sensing** - `createNativeWorldSensing` forwards to `__rcHost.sensing` one member at a time, exactly as occlusion and light estimation do. A host with no `sensing` slice at all is a normal, supported shape: every call is reported `unsupported` by `WorldSensingDirector` rather than this package refusing to exist.
+- **Scenes** - `createNativeScenes` puts the core's `SceneManager` over `__rcHost.scenes`. The native app builds each scene from its `src` with its own loaders, and physics from the physics components in it, and reports poses through the `interactions` slice as now. Scenes and nodes cross as the app's own string keys. A node's key is also its target id in the `interactions` slice, so an interaction target registered against a scene node resolves to that node. Hidden, for a scene or a node, means neither rendered nor hit-testable.
 
-## The three slices, and what happens when one is missing
+```ts
+interface NativeScenesHost {
+  build(def: SceneDefinition, visible: boolean): Promise<{ scene: string; nodes: { id: string; key: string }[] }>;
+  setVisible(scene: string, visible: boolean): void;
+  destroy(scene: string): void;
+  setNodeActive(node: string, active: boolean): void;
+  instantiate(asset: string, pose: WorldPose, scene: string, parent: string | null): string;
+  destroyInstance(instance: string): void;
+  detachNode(scene: string, node: string): void;   // persistent: out of the scene's lifetime
+  destroyNode(node: string): void;
+  onBuildProgress?(cb: (sceneId: string, progress: number) => void): () => void;
+}
+```
+
+The rules (single, additive, the stack, the active scene, preload, ordering, persistence, disposal) are the core's, so the app implements none of them. `test/helpers.ts` has `createFakeScenesHost`, an in-memory app that conforms, and `test/scene-port.test.ts` runs `sceneManagerContractCases()` over it.
+
+## The four slices, and what happens when one is missing
 
 | Slice | Required by | Missing |
 | --- | --- | --- |
 | `environment` | `NativeEnvironmentPort` | Throws at construction, naming the slice |
 | `audio` | `NativeAudioPort` | Throws at construction, naming the slice |
 | `sensing` | `NativeWorldSensingPort` | Never throws - every call reports `unsupported` |
+| `scenes` | `NativeScenePort` | Throws at construction, naming the slice |
 
 Every constructor also takes the slice directly, for tests: `new NativeEnvironmentPort(fakeHost)` never touches `globalThis`.
 

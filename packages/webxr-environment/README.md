@@ -14,6 +14,7 @@ Two directors and two ports.
 - **`WorldSensingDirector`** is the other half, and deliberately a separate object: it asks for planes, meshes and anchors, keeps the registries, runs standing hit tests, and emits what appeared, moved and went away. It reports what the host measured and builds nothing - the mesh you draw on a detected wall is yours.
 - **Sound has a direction as well as a distance.** A cue's `spatial.cone` says how narrowly it points and a play's `facing` says which way this one is turned, in radians and as a travel direction - the package's own terms, converted by each adapter to the degrees and the +Z forward its host happens to want.
 - **`AudioDirector`** owns a cue registry, a bus mix, the retrigger policy and the voices. The adapter is handed a resolved absolute gain and told to make a noise.
+- **`SceneManager`** manages scenes inside one session, because a WebXR app cannot change scene by changing page. See [Managing scenes](#managing-scenes).
 
 Every slot is a **platform facility** each host exposes differently - three.js has `scene.background` and `Fog`, IWSDK has `DomeGradient` and `AmbientLightComponent`, the next host will have something else. Presenting one description all of them can be driven from is the whole job.
 
@@ -22,7 +23,7 @@ Neither owns a loop. `update(deltaMs)` is called by whatever already runs per fr
 ## What it is not
 
 - **Not a session or capability layer.** It never reads `navigator.xr`. Passthrough arrives through `setPassthrough(boolean)`, pushed in by whatever already tracks it - on this stack, the service framework.
-- **Not content.** No geometry, no meshes, no prefabs, no placement, no floors. If a thing could be built by the app out of a geometry and a material, it does not belong here. Art direction is the app's too: the stock presets are examples to copy, not an opinion about how your world should look.
+- **Not content.** No geometry, no meshes, no prefabs, no placement, no floors. If a thing could be built by the app out of a geometry and a material, it does not belong here. `SceneManager` loads a scene's `src` through the host's own loader and never reads what is in it. Art direction is the app's too: the stock presets are examples to copy, not an opinion about how your world should look.
 - **Not an event source.** It plays sounds when asked; it has no notion of why.
 
 One name to keep straight: `@realitycollective/service-framework` exports an `EnvironmentDescriptor`, which means the PLATFORM environment the app is running in - a name plus a set of capability strings. The `EnvironmentSpec` here means the VISUAL environment: the sky, the fog and the light. Unrelated concepts, and an app can hold both.
@@ -61,6 +62,35 @@ director.apply({ fog: clearedFog(DUSK.fog!) });          // present, but invisib
 director.transition({ fog: DUSK.fog! }, { durationMs: 4000 });  // rolls in
 ```
 
+## Managing scenes
+
+`SceneManager` holds the rules and a `ScenePort` per host builds and destroys the content. Scenes are a list, like Unity's build settings; services load them by id and every host does it its own way.
+
+```ts
+const { manager } = createThreeScenes(scene, { environment: director, assets: (name) => prefabs[name].clone() });
+manager.register([
+  { id: "lobby", src: "/scenes/lobby.glb", environment: "dusk" },
+  { id: "court", src: "/scenes/court.glb" },
+]);
+await manager.load("lobby");                                  // single: replaces what is loaded
+manager.makePersistent("lobby", "hud");                       // survives single loads
+await manager.load("court", { mode: "additive" });            // adds to the top of the stack
+await manager.load("level-3", { activate: false });           // preload: built, hidden
+manager.activate("level-3");                                 // instant switch
+const id = manager.instantiate("ball", pose);                 // into the active scene
+manager.bindNode("court", "tee", (node) => registerTarget(node)); // released on unload
+```
+
+- **Single** unloads every loaded scene, keeping persistent nodes, then loads. Unloaded events fire before the loaded event.
+- **Additive** adds to the top of the stack and changes nothing else. **Unload** removes any scene in the stack; the rest keep their order, its instances go with it and its persistent nodes do not.
+- **The active scene** is where `instantiate` puts new objects, and its `environment` drives the director with a transition, exactly as a preset change does. Unloading it makes the top shown scene active, or none.
+- **Preload** (`activate: false`) builds a scene that is neither shown nor hit-testable until `activate`. That is how native gets an instant switch and the web a fetch hidden behind a fade. A preloaded single load replaces the other scenes when it is activated.
+- **Loads and unloads run in call order.** Loading a scene already loaded or loading returns the same promise; an id not in the list rejects.
+- **Node ids are unique within a scene**, and an instance id addresses its instance as a node of the scene it was spawned into. A persistent node moves to `PERSISTENT_SCENE_ID`. `bindNode` ties something such as an interaction target to a node while its scene is shown, and releases it when the scene unloads.
+- **`dispose`** leaves nothing on the host: no scenes, instances, persistent nodes, bindings, listeners or environment overrides.
+
+The adapters are `createThreeScenes`, `createIWSDKScenes` (IWSDK's own `SceneJSONImporter`, beside `world.loadLevel` rather than replacing it), `createXRBlocksScenes` and `createNativeScenes` (the `scenes` slice on `__rcHost`).
+
 ## Proving a new adapter conforms
 
 `environmentPortContractCases()`, `audioPortContractCases()` and `worldSensingPortContractCases()` are the `EnvironmentPort`, `AudioPort` and `WorldSensingPort` conformance suites, shipped as data rather than as tests. Each case is a `name` plus a `run(subject)` that returns silently on success and throws an `Error` describing the failure otherwise, so an adapter runs them in whatever test runner it already has. They ship runner-free because an adapter written outside this repository cannot reach into this one's `test/` folder.
@@ -75,7 +105,15 @@ for (const contractCase of environmentPortContractCases()) {
 }
 ```
 
-`makeMyEnvironmentPort()` (or the audio/world-sensing equivalent) runs once per case, because a case applies slots or starts voices and does not clean up after itself. The audio suite also takes a `driver`: something with `end(voiceId)` that makes the host finish a voice as though it stopped on its own, which is how the suite checks a one-shot's `ended` fires exactly once without depending on your engine's timing. `threejs-`, `iwsdk-`, `xrblocks-environment` and `native-environment` all run all three suites - `xrblocks-environment`'s audio suite runs against what `createXRBlocksAudio` returns, since that adapter reuses `ThreeAudioPort` outright - so a case failing on yours is a real difference in behaviour, not a difference in test style.
+`makeMyEnvironmentPort()` (or the audio/world-sensing equivalent) runs once per case, because a case applies slots or starts voices and does not clean up after itself. The audio suite also takes a `driver`: something with `end(voiceId)` that makes the host finish a voice as though it stopped on its own, which is how the suite checks a one-shot's `ended` fires exactly once without depending on your engine's timing. `sceneManagerContractCases()` is the fourth, and different in kind: it runs the real `SceneManager` over your real `ScenePort`, because the rules are what every host promises and the port is where a host can break them. You build the fixture scenes in `SCENE_CONTRACT_FIXTURES` with your host's own objects and hand the suite an inspector that answers from the host itself: does a node exist, is it shown, would the host's own hit testing find it, where is it, and how many objects has the port left behind.
+
+```ts
+for (const contractCase of sceneManagerContractCases()) {
+  it(contractCase.name, () => contractCase.run({ create: (fixtures) => makeMySceneHost(fixtures) }));
+}
+```
+
+`threejs-`, `iwsdk-`, `xrblocks-environment` and `native-environment` all run all four suites - `xrblocks-environment`'s audio suite runs against what `createXRBlocksAudio` returns, since that adapter reuses `ThreeAudioPort` outright - so a case failing on yours is a real difference in behaviour, not a difference in test style.
 
 ## Licence
 

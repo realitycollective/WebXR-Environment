@@ -4,15 +4,18 @@
  * Re-exports the whole engine-free core, so an app installs this package and
  * nothing else.
  */
+import type { Group, Object3D } from "three";
 import { AudioListener, Scene } from "three";
 import type {
   AudioDirectorOptions,
   EnvironmentDirectorOptions,
+  SceneManagerOptions,
 } from "@realitycollective/webxr-environment";
 import type { WorldSensingDirectorOptions } from "@realitycollective/webxr-environment";
 import {
   AudioDirector,
   EnvironmentDirector,
+  SceneManager,
   WorldSensingDirector,
 } from "@realitycollective/webxr-environment";
 import type { ThreeWorldSensingPortOptions } from "./world-sensing-port.js";
@@ -22,6 +25,8 @@ import type { ThreeEnvironmentPortOptions } from "./environment-port.js";
 import { ThreeEnvironmentPort } from "./environment-port.js";
 import type { ThreeAudioPortOptions } from "./audio-port.js";
 import { ThreeAudioPort } from "./audio-port.js";
+import type { ThreeScenePortOptions } from "./scene-port.js";
+import { ThreeScenePort } from "./scene-port.js";
 
 export type { EquirectLoader, ThreeEnvironmentPortOptions } from "./environment-port.js";
 export { ThreeEnvironmentPort } from "./environment-port.js";
@@ -29,6 +34,8 @@ export type { ThreeAudioPortOptions } from "./audio-port.js";
 export { ThreeAudioPort } from "./audio-port.js";
 export type { ThreeWorldSensingPortOptions } from "./world-sensing-port.js";
 export { ThreeWorldSensingPort } from "./world-sensing-port.js";
+export type { ThreeAssetFactory, ThreeSceneLoader, ThreeScenePortOptions } from "./scene-port.js";
+export { ThreeScenePort } from "./scene-port.js";
 export type { RampGradient } from "./sky-texture.js";
 export {
   createSkyTexture,
@@ -141,4 +148,28 @@ export function createThreeAudio(
 ): ThreeAudioSetup {
   const port = new ThreeAudioPort(listener, options);
   return { director: new AudioDirector(port, options), port };
+}
+
+export interface ThreeScenesSetup {
+  readonly manager: SceneManager<Group, Object3D>;
+  readonly port: ThreeScenePort;
+}
+
+/**
+ * Wire a scene manager to a three.js root. Each loaded scene becomes a group
+ * under `root`. Pass `environment` to let the active scene drive a director.
+ *
+ * ```ts
+ * const { director } = createThreeEnvironment(scene);
+ * const { manager } = createThreeScenes(scene, { environment: director, assets: (name) => prefabs[name].clone() });
+ * manager.register([{ id: "court", src: "/scenes/court.glb", environment: "dusk" }]);
+ * await manager.load("court");
+ * ```
+ */
+export function createThreeScenes(
+  root: Object3D,
+  options: SceneManagerOptions & ThreeScenePortOptions = {},
+): ThreeScenesSetup {
+  const port = new ThreeScenePort(root, options);
+  return { manager: new SceneManager(port, options), port };
 }
