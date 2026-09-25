@@ -29,6 +29,8 @@ So the test for anything proposed here is: *is this a facility the host exposes,
 
 **In scope.** Sky, fog, ambient and key lighting - `scene.background` / `scene.fog` / `AmbientLight` on three.js, `DomeGradient` / `AmbientLightComponent` on IWSDK - plus transitions between named presets and passthrough suppression of the first two. Audio: a cue registry, bus and master mix, retrigger policy, throttling and voice lifetime, over `Audio` / `PositionalAudio` or `AudioSource`.
 
+**Scene management (owner's decision, 2026-09-25).** A scene list, single and additive loading, unloading any scene in the stack, preloading, an active scene whose `environment` drives the director, persistent nodes and lifecycle events. It passes the test above: every host changes scenes, and each does it differently (IWSDK levels and `persistent` entities, three.js object graphs a host builds and disposes, a native app's own loaders with no engine in JavaScript at all), while the meaning is the same everywhere. The rules live in `SceneManager`; each host implements `ScenePort`, which builds and destroys content with the host's own loaders. A `src` means the same thing on every host.
+
 **Out of scope, and why.**
 
 | Turned down | Why | Whose |
@@ -39,7 +41,7 @@ So the test for anything proposed here is: *is this a facility the host exposes,
 | Interactables, behaviours, gaze, feedback **intents** | Interactions decides a sound *should* happen; this decides what it sounds like | WebXR-Interactions |
 | Any geometry at all - meshes, prefabs, placement, floors | Content. An app builds a floor from a geometry and a material; no platform facility is involved (see the ground-plane correction below) | the app |
 | Art direction | Content. The stock presets are examples to copy, not a view on how a world should look | the app |
-| Scene composition and asset loading | Explicitly not a promise of this stack (see Deliberately unowned) | nobody, deliberately |
+| Scene composition, asset decoding and converting scene formats between hosts | A `src` is resolved by the host's own loaders. What a scene contains, and turning one host's format into another's, is the app's asset pipeline (see Deliberately unowned) | the app |
 | Physics | Already recorded as the client's, surfaced by Interactions only as the `grabs: "native"` capability | nobody, deliberately |
 
 The core's architecture test enforces the first four: it fails on an engine import, an import of `@realitycollective/service-framework`, an import of `@realitycollective/webxr-input`, a read of `navigator.xr`, or any runtime dependency whatsoever.
@@ -116,8 +118,9 @@ That rule governs the parameters OF a capability. It deliberately does not gover
 
 Recorded so that the absence is visibly a decision:
 
-- **Scene composition / content descriptors.** The WebXR-Interactions README (position recorded 2026-09-03) states that portable world-building is not a current promise and that a shared content descriptor will be considered only when a second host is actually targeted. Nothing here changes that.
-- **Asset loading.** Cue `src` and any future texture reference are strings the adapter resolves. IWSDK has `AssetManager`; three.js has loaders; a portable asset layer is a fifth family, not a corner of this one.
+- **Scene composition / content descriptors.** The WebXR-Interactions README (position recorded 2026-09-03) states that portable world-building is not a current promise and that a shared content descriptor will be considered only when a second host is actually targeted. Scene MANAGEMENT moved in on 2026-09-25 (see In scope); what a scene contains did not. The manager loads a `src` and never reads it, and converting a scene format between hosts stays the app's pipeline.
+- **Asset loading.** Cue `src`, texture references and scene `src` are strings the adapter resolves. IWSDK has `AssetManager` and `SceneJSONImporter`; three.js has loaders; a native app has its own. A portable asset layer is a separate family, not a corner of this one.
+- **How a scene looks.** Materials, opacity, animation and effects are presentation the app builds per host. It is where a native host is meant to exceed the web.
 - **Physics.**
 - **WebXR composition layers** (`XRQuadLayer` and friends). A media layer is arguably environment, but it is also a rendering-pipeline concern that neither adapter's host currently exposes portably. Not taken.
 

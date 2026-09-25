@@ -1,5 +1,5 @@
 /**
- * The three slices of `globalThis.__rcHost` this family reads, and the code
+ * The four slices of `globalThis.__rcHost` this family reads, and the code
  * that finds them.
  *
  * ---------------------------------------------------------------------------
@@ -44,6 +44,7 @@ import type {
   OcclusionSpec,
   ResolvedLightEstimation,
   ResolvedWorldDetection,
+  SceneDefinition,
   SensingReport,
   SkySpec,
   WorldAnchor,
@@ -132,18 +133,60 @@ export interface NativeSensingHost {
   onSensingReport?(callback: (report: SensingReport) => void): () => void;
 }
 
+/** What the native app built for one scene: its own key for it, and every node by id. */
+export interface NativeBuiltScene {
+  /** The app's key for the scene. Unique among everything the app has keyed. */
+  readonly scene: string;
+  /**
+   * Every addressable node: its id in the scene, and the app's key for it.
+   * A node's key is also the target id the app uses for it in the
+   * `interactions` slice, which is how a target registered against a scene
+   * node resolves to that node.
+   */
+  readonly nodes: readonly { readonly id: string; readonly key: string }[];
+}
+
+/**
+ * `ScenePort`, at the native boundary: the `scenes` slice.
+ *
+ * The native app builds each scene from its `src` with its own loaders, and
+ * physics from the physics components in it; poses of what it simulates reach
+ * JavaScript through the `interactions` slice as before. Scenes and nodes
+ * cross as the app's own string keys. Hidden, for a scene or a node, means
+ * neither rendered nor hit-testable.
+ */
+export interface NativeScenesHost {
+  /** Build a scene, shown or hidden. Reject when it cannot be built, leaving nothing behind. */
+  build(def: SceneDefinition, visible: boolean): Promise<NativeBuiltScene>;
+  setVisible(scene: string, visible: boolean): void;
+  /** Remove a scene and everything still in it. */
+  destroy(scene: string): void;
+  /** Turn a node, and everything under it, on or off. */
+  setNodeActive(node: string, active: boolean): void;
+  /** Spawn a named asset at a world pose, in a scene, under an optional parent node. Returns its key. */
+  instantiate(asset: string, pose: WorldPose, scene: string, parent: string | null): string;
+  destroyInstance(instance: string): void;
+  /** Move a node out of its scene's lifetime, keeping its world pose and visibility. */
+  detachNode(scene: string, node: string): void;
+  /** Remove a node `detachNode` moved out. */
+  destroyNode(node: string): void;
+  /** Build progress for a scene id, 0 to 1. Optional. */
+  onBuildProgress?(callback: (sceneId: string, progress: number) => void): () => void;
+}
+
 /** The root of `globalThis.__rcHost`, as far as this package ever reads it. */
 interface NativeHostRoot {
   readonly environment?: NativeEnvironmentHost;
   readonly audio?: NativeAudioHost;
   readonly sensing?: NativeSensingHost;
+  readonly scenes?: NativeScenesHost;
 }
 
 function globalHost(): NativeHostRoot | undefined {
   return (globalThis as Record<string, unknown>)[NATIVE_HOST_GLOBAL] as NativeHostRoot | undefined;
 }
 
-function missingSlice(name: "environment" | "audio"): Error {
+function missingSlice(name: "environment" | "audio" | "scenes"): Error {
   return new Error(
     `[native-environment] no ${name} host: globalThis.${NATIVE_HOST_GLOBAL}.${name} is not installed. ` +
       `Either pass a ${name} host in directly, or have the native app install it before the bundle is evaluated.`,
@@ -177,4 +220,11 @@ export function getAudioHost(host?: NativeAudioHost): NativeAudioHost {
  */
 export function getSensingHost(host?: NativeSensingHost): NativeSensingHost | undefined {
   return host ?? globalHost()?.sensing;
+}
+
+/** The scenes slice: the one passed in, or `globalThis.__rcHost.scenes`. Throws when neither has one. */
+export function getScenesHost(host?: NativeScenesHost): NativeScenesHost {
+  const found = host ?? globalHost()?.scenes;
+  if (found === undefined) throw missingSlice("scenes");
+  return found;
 }

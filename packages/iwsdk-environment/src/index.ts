@@ -9,17 +9,27 @@ import { createSystem } from "./create-system.js";
 import type {
   AudioDirectorOptions,
   EnvironmentDirectorOptions,
+  SceneManagerOptions,
 } from "@realitycollective/webxr-environment";
-import { AudioDirector, EnvironmentDirector } from "@realitycollective/webxr-environment";
+import { AudioDirector, EnvironmentDirector, SceneManager } from "@realitycollective/webxr-environment";
 import type { IWSDKEnvironmentPortOptions } from "./environment-port.js";
 import { IWSDKEnvironmentPort } from "./environment-port.js";
 import type { IWSDKAudioPortOptions } from "./audio-port.js";
 import { IWSDKAudioPort } from "./audio-port.js";
+import type { IWSDKScenePortOptions } from "./scene-port.js";
+import { IWSDKScenePort } from "./scene-port.js";
 
 export type { IWSDKEnvironmentPortOptions } from "./environment-port.js";
 export { IWSDKEnvironmentPort } from "./environment-port.js";
 export type { IWSDKAudioPortOptions } from "./audio-port.js";
 export { IWSDKAudioPort } from "./audio-port.js";
+export type {
+  IWSDKAssetFactory,
+  IWSDKSceneContent,
+  IWSDKSceneLoader,
+  IWSDKScenePortOptions,
+} from "./scene-port.js";
+export { IWSDKScenePort } from "./scene-port.js";
 export type { IWSDKWorldSensingPortOptions } from "./world-sensing-port.js";
 export { IWSDKWorldSensingPort } from "./world-sensing-port.js";
 
@@ -121,3 +131,23 @@ export function registerEnvironment(
 }
 
 export type { Entity as IWSDKEntity };
+
+export interface IWSDKScenesSetup {
+  readonly manager: SceneManager<Entity, Entity>;
+  readonly port: IWSDKScenePort;
+}
+
+/**
+ * Wire a scene manager to an IWSDK world. Scenes are `iwsdk.scene.v1`
+ * documents built by IWSDK's own importer, each under a persistent root of
+ * its own, so they live beside `world.loadLevel` rather than replacing it.
+ * Pass `environment: setup.environment` from `registerEnvironment` to let the
+ * active scene drive the sky, fog and light.
+ */
+export function createIWSDKScenes(
+  world: World,
+  options: SceneManagerOptions & IWSDKScenePortOptions = {},
+): IWSDKScenesSetup {
+  const port = new IWSDKScenePort(world, options);
+  return { manager: new SceneManager(port, options), port };
+}

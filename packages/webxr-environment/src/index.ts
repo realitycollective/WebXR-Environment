@@ -99,6 +99,31 @@ export type {
 } from "./environment-director.js";
 export { EnvironmentDirector } from "./environment-director.js";
 
+export type {
+  InstantiateOptions,
+  LoadedScene,
+  LoadedSceneState,
+  SceneDefinition,
+  SceneLoadMode,
+  SceneLoadOptions,
+  ScenePort,
+} from "./scenes.js";
+export { PERSISTENT_SCENE_ID } from "./scenes.js";
+
+export type { SceneManagerOptions, SceneNodeBinder } from "./scene-manager.js";
+export { SceneManager } from "./scene-manager.js";
+
+export type {
+  SceneContractFixtures,
+  SceneContractHost,
+  SceneContractInspector,
+  SceneContractNode,
+  SceneContractScene,
+  SceneManagerContractCase,
+  SceneManagerContractSubject,
+} from "./scene-contract-cases.js";
+export { SCENE_CONTRACT_FIXTURES, sceneManagerContractCases } from "./scene-contract-cases.js";
+
 export type { AudioDirectorOptions } from "./audio-director.js";
 export { AudioDirector } from "./audio-director.js";
 

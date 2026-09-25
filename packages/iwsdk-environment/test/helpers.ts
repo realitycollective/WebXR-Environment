@@ -88,7 +88,9 @@ export function createFakeEntity(object3D?: Object3D): FakeEntity {
       return view;
     },
     destroy() {
+      // IWSDK's entity release takes the object out of the graph too.
       this.destroyed = true;
+      this.object3D?.removeFromParent();
     },
   };
   return entity;
@@ -105,10 +107,12 @@ export interface FakeSystem {
 
 export interface FakeWorld {
   readonly scene: Scene;
+  /** The persistent root entity, wrapping `scene`. */
+  readonly sceneEntity: FakeEntity;
   activeLevel: { value: FakeEntity | null };
   readonly created: FakeEntity[];
   readonly registeredSystems: unknown[];
-  createTransformEntity(object?: Object3D, options?: { parent?: FakeEntity }): FakeEntity;
+  createTransformEntity(object?: Object3D, options?: FakeEntity | { parent?: FakeEntity; persistent?: boolean }): FakeEntity;
   registerSystem(system: unknown, options?: { configData?: Record<string, unknown> }): void;
   getSystem(system: unknown): FakeSystem | undefined;
   /** elics registers queries here; the world-sensing port reads their sets. */
@@ -123,8 +127,10 @@ export function createFakeWorld(options: { withLevel?: boolean } = {}): FakeWorl
   const created: FakeEntity[] = [];
   const systems = new Map<unknown, FakeSystem>();
   const queries = new Map<unknown, Set<FakeEntity>>();
+  const scene = new Scene();
   return {
-    scene: new Scene(),
+    scene,
+    sceneEntity: createFakeEntity(scene),
     activeLevel: { value: options.withLevel === false ? null : createFakeEntity() },
     created,
     registeredSystems: [],
@@ -133,7 +139,14 @@ export function createFakeWorld(options: { withLevel?: boolean } = {}): FakeWorl
       // name means - so the fake gives it one rather than leaving a hole the
       // real world never has.
       const entity = createFakeEntity(object ?? new Object3D());
-      entity.parent = entityOptions?.parent;
+      // Either spelling IWSDK accepts: a parent entity, or an options bag.
+      const parent =
+        entityOptions !== undefined && "components" in entityOptions
+          ? entityOptions
+          : (entityOptions as { parent?: FakeEntity } | undefined)?.parent;
+      entity.parent = parent;
+      // The real world adds the object under its parent's object.
+      if (parent?.object3D !== undefined && entity.object3D !== undefined) parent.object3D.add(entity.object3D);
       created.push(entity);
       return entity;
     },
