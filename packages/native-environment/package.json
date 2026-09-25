@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/native-environment",
-  "version": "0.1.1-preview.1",
+  "version": "0.1.1-preview.2",
   "description": "Native host adapter for the Reality Collective WebXR Environment Extensions - reads the environment, audio and sensing slices of globalThis.__rcHost that a native app (OpenXR, visionOS) installs, and forwards the engine-free @realitycollective/webxr-environment core's ports to it as plain data. No asset decoding here: a sky, an environment map or an audio cue crosses as a src string the native app resolves itself. Re-exports the core.",
   "keywords": [
     "realitycollective",
@@ -37,7 +37,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-environment": "^0.1.1-preview.1"
+    "@realitycollective/webxr-environment": "^0.1.1-preview.2"
   },
   "repository": {
     "type": "git",
