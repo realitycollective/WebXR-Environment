@@ -4,6 +4,7 @@
  * with the gaps the audit found.
  */
 import { describe, expect, it } from "vitest";
+import { distanceGain, type WorldPose } from "@realitycollective/webxr-environment";
 import type {
   EstimatedLighting,
   OcclusionSpec,
@@ -120,23 +121,36 @@ function referenceEnvironment(options: ReferenceEnvironmentOptions = {}) {
   return { environment, environmentTest };
 }
 
-function referenceAudio(options: { ignoreStop?: boolean } = {}) {
-  const voices = new Map<number, string>();
+/** The head the reference host keeps its listener at. */
+const HEAD: WorldPose = { position: [0.5, 1.6, -0.25], orientation: [0, Math.SQRT1_2, 0, Math.SQRT1_2] };
+
+function referenceAudio(options: { ignoreStop?: boolean; listenerOffset?: number; ignoreAttenuation?: boolean } = {}) {
+  const voices = new Map<number, { cueId: string; request: NativeAudioVoiceRequest }>();
   const audio: NativeAudioHost = {
-    start: (request: NativeAudioVoiceRequest) => voices.set(request.voiceId, request.cue.id),
+    start: (request: NativeAudioVoiceRequest) => voices.set(request.voiceId, { cueId: request.cue.id, request }),
     stop: (voiceId) => {
       if (!options.ignoreStop) voices.delete(voiceId);
     },
     onVoiceEnded: () => () => {},
   };
+  const listener: WorldPose = { position: [HEAD.position[0] + (options.listenerOffset ?? 0), HEAD.position[1], HEAD.position[2]], orientation: HEAD.orientation };
   const audioTest: NativeAudioTestHost = {
-    voices: () => [...voices].map(([voiceId, cueId]) => ({ voiceId, cueId })),
+    voices: () => [...voices].map(([voiceId, voice]) => ({ voiceId, cueId: voice.cueId })),
+    // A correct host attenuates exactly by the core's distance models from its listener.
+    voiceDistanceGain: (voiceId) => {
+      const voice = voices.get(voiceId);
+      if (!voice || voice.request.at === null || options.ignoreAttenuation) return 1;
+      const at = voice.request.at;
+      const d = Math.hypot(at[0] - listener.position[0], at[1] - listener.position[1], at[2] - listener.position[2]);
+      return distanceGain(d, voice.request.spatial);
+    },
+    listenerPose: () => listener,
   };
   return { audio, audioTest };
 }
 
 function reference() {
-  return { ...referenceEnvironment(), ...referenceAudio(), cueSrc: "kit://click" };
+  return { ...referenceEnvironment(), ...referenceAudio(), cueSrc: "kit://click", headPose: () => HEAD };
 }
 
 describe("native Environment host conformance kit, against reference hosts", () => {
@@ -159,6 +173,29 @@ describe("native Environment host conformance kit, against reference hosts", () 
   it("fails a host with no applyOcclusion, the gap the audit found", async () => {
     const setup = { ...reference(), ...referenceEnvironment({ occlusion: false }) };
     await expect(find("occlusion").run(setup)).rejects.toThrow(/no applyOcclusion/);
+  });
+
+  it("fails a host that attenuates by its own rule, or cannot be read", async () => {
+    const attenuation = find("attenuates by the core defaults");
+    await expect(attenuation.run({ ...reference(), ...referenceAudio({ ignoreAttenuation: true }) })).rejects.toThrow(/must be at/);
+    const blind = reference();
+    await expect(attenuation.run({ ...blind, audioTest: { voices: blind.audioTest.voices } })).rejects.toThrow(/no voiceDistanceGain or listenerPose/);
+    const quietNear = reference();
+    quietNear.audioTest.voiceDistanceGain = () => 0.5;
+    await expect(attenuation.run(quietNear)).rejects.toThrow(/must be at full volume/);
+  });
+
+  it("fails a host whose listener is not at the head, or that gives the kit no head", async () => {
+    const listener = find("listener is at the viewer");
+    await expect(listener.run({ ...reference(), ...referenceAudio({ listenerOffset: 0.5 }) })).rejects.toThrow(/from the head/);
+    const turned = reference();
+    turned.audioTest.listenerPose = () => ({ position: HEAD.position, orientation: [0, 0, 0, 1] });
+    await expect(listener.run(turned)).rejects.toThrow(/does not face/);
+    const { headPose: _unused, ...noHead } = reference();
+    void _unused;
+    await expect(listener.run(noHead)).rejects.toThrow(/no headPose/);
+    const noListener = reference();
+    await expect(listener.run({ ...noListener, audioTest: { voices: noListener.audioTest.voices } })).rejects.toThrow(/no listenerPose/);
   });
 
   it("fails a host with no audio slice, the gap the audit found", async () => {
@@ -287,6 +324,50 @@ describe("native Environment host conformance kit, every failure path", () => {
     await expect(find("occlusion").run(lying({ appliedOcclusion: () => ({ mode: "hard", scope: "all" }) as never }))).rejects.toThrow(/while passthrough was off/);
     // A host that never applies the spec it was handed when passthrough starts.
     await expect(find("occlusion").run(lying({ appliedOcclusion: () => null }))).rejects.toThrow(/expected the remembered/);
+  });
+
+  it("fails a host that keeps occlusion applied after it was cleared, and leaves a correct host clean for a second run", async () => {
+    const base = reference();
+    let applied: unknown = null;
+    let calls = 0;
+    const sticky = {
+      ...base,
+      environment: {
+        ...base.environment,
+        applyOcclusion: (spec: unknown) => {
+          calls += 1;
+          if (spec !== null) applied = spec;
+        },
+      },
+      environmentTest: { ...base.environmentTest, appliedOcclusion: () => applied as never },
+    };
+    await expect(find("occlusion").run(sticky)).rejects.toThrow(/stayed applied/);
+    expect(calls).toBeGreaterThan(0);
+    const clean = reference();
+    await find("occlusion").run(clean);
+    expect(clean.environmentTest.appliedOcclusion()).toBeFalsy();
+    await find("occlusion").run(clean);
+  });
+
+  it("loads the sky image the kit was given, and the kit name when none was", async () => {
+    const skyCase = find("every sky kind");
+    const srcsSeen = (setup: ReturnType<typeof reference>) => {
+      const seen: string[] = [];
+      const original = setup.environment.applySky.bind(setup.environment);
+      setup.environment.applySky = (sky) => {
+        if (sky?.kind === "texture") seen.push(sky.src);
+        original(sky);
+      };
+      return seen;
+    };
+    const given = reference();
+    const givenSeen = srcsSeen(given);
+    await skyCase.run({ ...given, skySrc: "app://skies/noon.hdr" });
+    expect(givenSeen).toEqual(["app://skies/noon.hdr"]);
+    const bare = reference();
+    const bareSeen = srcsSeen(bare);
+    await skyCase.run(bare);
+    expect(bareSeen).toEqual(["kit://sky.hdr"]);
   });
 
   it("fails every audio policy case on a host that sounds the wrong number of voices", async () => {

@@ -37,7 +37,7 @@ import {
 } from "@iwsdk/core";
 import { Quaternion, Vector3 } from "three";
 import type { AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
-import { AudioStartReaper } from "@realitycollective/webxr-environment";
+import { AudioStartReaper, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 
 export interface IWSDKAudioPortOptions {
   /** Parent for the voice entities. Defaults to the world's default parent. */
@@ -105,7 +105,10 @@ export class IWSDKAudioPort implements AudioPort {
         view[3] = TEMP_ROTATION.w;
       }
     }
-    const attenuation = request.spatial;
+    // Every field arrives resolved from the core defaults (the director's
+    // `resolveAudioSpatial`), Web Audio's own, so this port writes them all:
+    // the same cue attenuates the same on every platform.
+    const attenuation = positional ? (request.spatial ?? resolveAudioSpatial(null)) : null;
     entity.addComponent(AudioSource, {
       src: request.cue.src,
       volume: request.gain,
@@ -114,21 +117,15 @@ export class IWSDKAudioPort implements AudioPort {
       autoplay: false,
       // The core already applied the cue's policy before we got here.
       playbackMode: PlaybackMode.Overlap,
-      // Anything the cue did not describe is left to IWSDK's own defaults,
-      // which is why these are spread in rather than defaulted here: this port
-      // has no opinion about how far a sound carries, and inventing one would
-      // make the same cue sound different on each engine.
-      ...(attenuation?.refDistance === undefined ? {} : { refDistance: attenuation.refDistance }),
-      ...(attenuation?.rolloffFactor === undefined
-        ? {}
-        : { rolloffFactor: attenuation.rolloffFactor }),
-      ...(attenuation?.maxDistance === undefined ? {} : { maxDistance: attenuation.maxDistance }),
-      ...(attenuation?.model === undefined ? {} : { distanceModel: distanceModel(attenuation.model) }),
-      // Radians in the contract, degrees on the component - IWSDK passes these
-      // straight to the same Web Audio panner three.js uses.
-      ...(attenuation?.cone === undefined
+      ...(attenuation === null
         ? {}
         : {
+            refDistance: attenuation.refDistance,
+            rolloffFactor: attenuation.rolloffFactor,
+            maxDistance: attenuation.maxDistance,
+            distanceModel: distanceModel(attenuation.model),
+            // Radians in the contract, degrees on the component - IWSDK passes
+            // these straight to the same Web Audio panner three.js uses.
             coneInnerAngle: toDegrees(attenuation.cone.inner),
             coneOuterAngle: toDegrees(attenuation.cone.outer),
             coneOuterGain: attenuation.cone.outsideGain,

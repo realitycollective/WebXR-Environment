@@ -147,10 +147,29 @@ export interface NativeAudioHost {
    * throttling dropped a play too soon after the last. So the host starts
    * exactly what it is handed: `gain` is absolute (master x bus x cue x play,
    * never below 0), `loop` loops, `at` is a world position in metres or
-   * `null` for the listener, `spatial` is the attenuation or `null` for the
-   * host's defaults. One voice per request, never pooled or merged: IWSDK's
-   * `IWSDKAudioPort` gives each voice its own entity and pins its playback
-   * mode to overlap so its engine never second-guesses the director.
+   * `null` for a voice heard from the listener with no attenuation at all.
+   *
+   * `spatial` is the attenuation of a positional voice, EVERY field resolved
+   * by the core (`AUDIO_ATTENUATION_DEFAULTS` in
+   * `@realitycollective/webxr-environment`, Web Audio's panner defaults):
+   * `model` is the distance curve (`"inverse"`: full volume within
+   * `refDistance` metres, then `ref / (ref + rolloff * (d - ref))`;
+   * `"linear"`, `"exponential"` as Web Audio defines them), `maxDistance` in
+   * metres past which it gets no quieter, and `cone.inner`/`cone.outer` are
+   * the FULL cone widths in RADIANS about `facing` inside which the voice is
+   * at full volume and beyond which it is at `cone.outsideGain`. The host
+   * applies exactly these, never its engine's own defaults; the core's
+   * `distanceGain` states the number the kit checks. `null` only for a voice
+   * played from the listener.
+   *
+   * The listener is the viewer's head: the host places its engine's listener
+   * at the head pose the `input` slice reports, position and orientation,
+   * every frame (`AUDIO_LISTENER_RULE`). IWSDK: the `AudioListener` on the
+   * camera.
+   *
+   * One voice per request, never pooled or merged: IWSDK's `IWSDKAudioPort`
+   * gives each voice its own entity and pins its playback mode to overlap so
+   * its engine never second-guesses the director.
    */
   start(request: NativeAudioVoiceRequest): void;
   /** Stop one voice. Called at most once per voice, and never after `onVoiceEnded` named it. */
@@ -220,6 +239,15 @@ export interface NativeEnvironmentTestHost {
 export interface NativeAudioTestHost {
   /** Every voice the host is sounding now. */
   voices(): readonly { readonly voiceId: number; readonly cueId: string }[];
+  /**
+   * The gain factor (0..1) distance attenuation leaves a sounding positional
+   * voice with now, before the request's own `gain`: 1 within
+   * `refDistance`, `distanceGain(d, spatial)` beyond. Optional; the
+   * attenuation case fails a host without it.
+   */
+  voiceDistanceGain?(voiceId: number): number;
+  /** Where the host's audio listener is now, world space. Optional; the listener case fails a host without it. */
+  listenerPose?(): WorldPose;
 }
 
 /**

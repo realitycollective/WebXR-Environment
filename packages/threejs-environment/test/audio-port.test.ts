@@ -1,3 +1,4 @@
+import { resolveAudioSpatial } from "@realitycollective/webxr-environment";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Audio, Group, PositionalAudio, Scene, Vector3 } from "three";
 import type { AudioCue, AudioVoiceRequest } from "@realitycollective/threejs-environment";
@@ -260,7 +261,7 @@ describe("ThreeAudioPort", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+        spatial: resolveAudioSpatial({ refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" }),
       }),
     );
     const holder = scene.children.find((child) => child.name.startsWith("webxr-environment:voice"));
@@ -281,7 +282,7 @@ describe("ThreeAudioPort", () => {
       request({
         at: [0, 0, 0],
         // A quarter-turn cone facing straight down.
-        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        spatial: resolveAudioSpatial({ cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } }),
         facing: [0, -1, 0],
       }),
     );

@@ -1,3 +1,4 @@
+import { AUDIO_ATTENUATION_DEFAULTS, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AudioSource,
@@ -256,7 +257,7 @@ describe("IWSDKAudioPort", () => {
 });
 
 describe("spatial attenuation", () => {
-  it("writes the cue's fall-off onto the AudioSource, and nothing it did not name", () => {
+  it("writes the cue's fall-off onto the AudioSource, every field resolved from the core defaults", () => {
     stubAudioUtils();
     const world = createFakeWorld();
     const port = new IWSDKAudioPort(asWorld(world));
@@ -264,7 +265,7 @@ describe("spatial attenuation", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+        spatial: resolveAudioSpatial({ refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" }),
       }),
     );
     const withSpatial = world.created.at(-1);
@@ -273,13 +274,20 @@ describe("spatial attenuation", () => {
     expect(withSpatial?.components.get(AudioSource)?.["maxDistance"]).toBe(30);
     expect(withSpatial?.components.get(AudioSource)?.["distanceModel"]).toBe("linear");
 
-    port.start(request({ voiceId: 2, at: [0, 0, 0], spatial: { model: "exponential" } }));
+    port.start(request({ voiceId: 2, at: [0, 0, 0], spatial: resolveAudioSpatial({ model: "exponential" }) }));
     const sparse = world.created.at(-1);
     expect(sparse?.components.get(AudioSource)?.["distanceModel"]).toBe("exponential");
-    expect(sparse?.components.get(AudioSource)).not.toHaveProperty("refDistance");
+    // A field the cue did not name is the core default, never IWSDK's own.
+    expect(sparse?.components.get(AudioSource)?.["refDistance"]).toBe(AUDIO_ATTENUATION_DEFAULTS.refDistance);
+    expect(sparse?.components.get(AudioSource)?.["maxDistance"]).toBe(AUDIO_ATTENUATION_DEFAULTS.maxDistance);
+    expect(sparse?.components.get(AudioSource)?.["coneInnerAngle"]).toBe(360);
+    expect(sparse?.components.get(AudioSource)?.["coneOuterGain"]).toBe(0);
 
-    port.start(request({ voiceId: 3, at: [0, 0, 0], spatial: { model: "inverse" } }));
+    port.start(request({ voiceId: 3, at: [0, 0, 0], spatial: resolveAudioSpatial({ model: "inverse" }) }));
     expect(world.created.at(-1)?.components.get(AudioSource)?.["distanceModel"]).toBe("inverse");
+    // A request built by hand with no attenuation still gets the core defaults.
+    port.start(request({ voiceId: 4, at: [0, 0, 0], spatial: null }));
+    expect(world.created.at(-1)?.components.get(AudioSource)?.["refDistance"]).toBe(1);
   });
 
   it("writes a cone in degrees and turns the entity to face where it points", () => {
@@ -290,7 +298,7 @@ describe("spatial attenuation", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        spatial: resolveAudioSpatial({ cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } }),
         facing: [0, 0, -1],
       }),
     );
