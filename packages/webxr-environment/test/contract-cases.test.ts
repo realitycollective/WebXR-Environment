@@ -208,6 +208,11 @@ const STOP_GUARDS_END = "after stop, driving an end does not call ended";
 const SET_GAIN = "setGain on a sounding voice does not throw, when it implements setGain";
 const LOAD_RETURN = "load returns void or a promise, when it implements load";
 const AUDIO_DISPOSE = "dispose can be called twice, when it implements dispose";
+const NEVER_STARTS =
+  "a voice that never starts is released once the port's own start timeout elapses, when the port implements update";
+
+/** The fake `AudioPort`'s own start-timeout, independent of the real default so tests stay fast. */
+const FAKE_START_TIMEOUT_MS = 50;
 
 interface FakeAudioConfig {
   readonly oneShot?: "immediate" | "deferred" | "silent";
@@ -218,10 +223,20 @@ interface FakeAudioConfig {
   readonly setGain?: "ok" | "absent" | "throws";
   readonly load?: "ok" | "absent" | "invalid" | "promise";
   readonly dispose?: "ok" | "absent" | "throws-twice";
+  /**
+   * "ok" reaps a voice still waiting once `FAKE_START_TIMEOUT_MS` has passed,
+   * matching the real rule; "never-fires" is the defect the new case exists
+   * to catch; "absent" leaves `update` off the port entirely, which the case
+   * must treat as "cannot be held to this rule" rather than a failure.
+   */
+  readonly startTimeout?: "ok" | "absent" | "never-fires";
 }
 
-function makeAudioSubject(config: FakeAudioConfig = {}): { port: AudioPort; driver: AudioPortContractDriver } {
+function makeAudioSubject(
+  config: FakeAudioConfig = {},
+): { port: AudioPort; driver: AudioPortContractDriver; startTimeoutMs: number } {
   const tracked = new Map<number, () => void>();
+  const waiting = new Map<number, number>();
   let disposedOnce = false;
 
   const port: AudioPort = {
@@ -234,6 +249,7 @@ function makeAudioSubject(config: FakeAudioConfig = {}): { port: AudioPort; driv
       if (mode === "silent") return;
       if (mode === "deferred") {
         tracked.set(request.voiceId, request.ended);
+        waiting.set(request.voiceId, 0);
         return;
       }
       request.ended();
@@ -241,6 +257,7 @@ function makeAudioSubject(config: FakeAudioConfig = {}): { port: AudioPort; driv
     },
     stop(voiceId) {
       if (config.stopThrows) throw new Error("stop broke");
+      waiting.delete(voiceId);
       const ended = tracked.get(voiceId);
       if (!config.ignoreStopForEnd) tracked.delete(voiceId);
       if (config.stopCallsEndedItself) ended?.();
@@ -265,9 +282,26 @@ function makeAudioSubject(config: FakeAudioConfig = {}): { port: AudioPort; driv
       disposedOnce = true;
     };
   }
+  if ((config.startTimeout ?? "ok") !== "absent") {
+    port.update = (deltaMs) => {
+      if (config.startTimeout === "never-fires") return;
+      for (const [voiceId, waited] of [...waiting]) {
+        const next = waited + deltaMs;
+        if (next < FAKE_START_TIMEOUT_MS) {
+          waiting.set(voiceId, next);
+          continue;
+        }
+        waiting.delete(voiceId);
+        const ended = tracked.get(voiceId);
+        tracked.delete(voiceId);
+        ended?.();
+      }
+    };
+  }
 
   const driver: AudioPortContractDriver = {
     end(voiceId) {
+      waiting.delete(voiceId);
       const ended = tracked.get(voiceId);
       if (ended === undefined) return;
       tracked.delete(voiceId);
@@ -275,7 +309,7 @@ function makeAudioSubject(config: FakeAudioConfig = {}): { port: AudioPort; driv
       if (config.doubleEnded) ended();
     },
   };
-  return { port, driver };
+  return { port, driver, startTimeoutMs: FAKE_START_TIMEOUT_MS };
 }
 
 function findAudioCase(name: string) {
@@ -338,8 +372,25 @@ describe("audioPortContractCases", () => {
           tracked.delete(voiceId);
         },
       };
+      // No `startTimeoutMs`: the new case falls back to
+      // `DEFAULT_AUDIO_START_TIMEOUT_MS`, and a port with no `update` at all
+      // is skipped rather than failed - see the case's own guard.
       await expect(invoke(() => contractCase.run({ port, driver }))).resolves.toBeUndefined();
     }
+  });
+
+  it("passes a conforming port that reaps a voice that never starts", async () => {
+    await expect(
+      invoke(() => findAudioCase(NEVER_STARTS).run(makeAudioSubject({ oneShot: "deferred" }))),
+    ).resolves.toBeUndefined();
+  });
+
+  it("skips a port that declares no update at all", async () => {
+    await expect(
+      invoke(() =>
+        findAudioCase(NEVER_STARTS).run(makeAudioSubject({ oneShot: "deferred", startTimeout: "absent" })),
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -390,6 +441,12 @@ describe("audioPortContractCases catches a broken port", () => {
     await expect(runAudioCase(AUDIO_DISPOSE, { dispose: "throws-twice" })).rejects.toThrow(
       /second dispose\(\) must be a no-op/,
     );
+  });
+
+  it("rejects a port whose update never reaps a voice that never starts", async () => {
+    await expect(
+      runAudioCase(NEVER_STARTS, { oneShot: "deferred", startTimeout: "never-fires" }),
+    ).rejects.toThrow(/must be released once its start timeout .* elapses/);
   });
 
   it("fails loudly when asked for a case that does not exist", () => {

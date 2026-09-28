@@ -108,6 +108,81 @@ describe("NativeAudioPort", () => {
     expect(host.requests).toEqual([]);
   });
 
+  it("releases a voice the host never reports on, after the start timeout, and tells the host to stop it", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const host = createFakeAudioHost();
+    const port = new NativeAudioPort(host, { startTimeoutMs: 1000 });
+    const voice = request();
+
+    port.start(voice);
+    port.update(999);
+    expect(voice.ended).not.toHaveBeenCalled();
+
+    port.update(1);
+    expect(voice.ended).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(host.stopped).toEqual([1]);
+
+    // A late report for the same id finds nothing left to end.
+    host.emitVoiceEnded(1);
+    expect(voice.ended).toHaveBeenCalledOnce();
+  });
+
+  it("never reaps a looping voice by the start timeout", () => {
+    const host = createFakeAudioHost();
+    const port = new NativeAudioPort(host, { startTimeoutMs: 10 });
+    const voice = request({ loop: true });
+
+    port.start(voice);
+    port.update(1_000_000);
+    expect(voice.ended).not.toHaveBeenCalled();
+  });
+
+  it("never reaps a voice whose cue declares its own durationMs by the start timeout", () => {
+    const host = createFakeAudioHost();
+    const port = new NativeAudioPort(host, { startTimeoutMs: 10 });
+    const voice = request({ cue: { ...CLICK, durationMs: 60_000 } });
+
+    port.start(voice);
+    port.update(1_000_000);
+    expect(voice.ended).not.toHaveBeenCalled();
+  });
+
+  it("stops watching a voice once onVoiceEnded reports it, so the start timeout never fires for it", () => {
+    const host = createFakeAudioHost();
+    const port = new NativeAudioPort(host, { startTimeoutMs: 10 });
+    const voice = request();
+
+    port.start(voice);
+    host.emitVoiceEnded(1);
+    port.update(1_000_000);
+    expect(voice.ended).toHaveBeenCalledOnce();
+  });
+
+  it("skips a voice another one's ended callback already stopped, when its own timeout comes up in the same update()", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const host = createFakeAudioHost();
+    const port = new NativeAudioPort(host, { startTimeoutMs: 100 });
+
+    const second = request({ voiceId: 2 });
+    const first = request({
+      voiceId: 1,
+      ended: vi.fn(() => port.stop(2)),
+    });
+    port.start(first);
+    port.start(second);
+
+    expect(() => port.update(101)).not.toThrow();
+
+    expect(first.ended).toHaveBeenCalledOnce();
+    expect(second.ended).not.toHaveBeenCalled();
+    // Only voice 1's timeout actually ran the warn-and-stop path; voice 2's
+    // was already gone from `#ended` by the time its own timeout came up - it
+    // was still stopped, just via the reentrant `port.stop(2)` above, once.
+    expect(warn).toHaveBeenCalledOnce();
+    expect(host.stopped).toEqual([1, 2]);
+  });
+
   it("dispose is safe to call twice, and stops listening to onVoiceEnded", () => {
     const host = createFakeAudioHost();
     const port = new NativeAudioPort(host);

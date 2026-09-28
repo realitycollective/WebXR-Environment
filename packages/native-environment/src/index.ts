@@ -13,8 +13,9 @@
  * to `globalThis.__rcHost`, which is what a real native app installs.
  *
  * Like every adapter, it exports its ports, their setup helpers and the
- * structural types of what the host provides. Reading the slices off the
- * global stays internal.
+ * structural types of what the host provides, plus the host conformance kit
+ * a native app runs on its device. Reading the slices off the global stays
+ * internal.
  */
 import type {
   AudioDirectorOptions,
@@ -29,6 +30,7 @@ import {
   WorldSensingDirector,
 } from "@realitycollective/webxr-environment";
 import { NativeAudioPort } from "./audio-port.js";
+import type { NativeAudioPortOptions } from "./audio-port.js";
 import { NativeEnvironmentPort } from "./environment-port.js";
 import { NativeWorldSensingPort } from "./world-sensing-port.js";
 import { NativeScenePort } from "./scene-port.js";
@@ -41,14 +43,22 @@ import type {
 
 export type {
   NativeAudioHost,
+  NativeAudioTestHost,
   NativeAudioVoiceRequest,
   NativeBuiltScene,
   NativeEnvironmentHost,
+  NativeEnvironmentTestHost,
   NativeScenesHost,
   NativeSensingHost,
 } from "./native-types.js";
+export { nativeEnvironmentHostConformanceCases } from "./conformance.js";
+export type {
+  NativeEnvironmentHostConformanceCase,
+  NativeEnvironmentHostConformanceSetup,
+} from "./conformance.js";
 export { NativeEnvironmentPort } from "./environment-port.js";
 export { NativeAudioPort } from "./audio-port.js";
+export type { NativeAudioPortOptions } from "./audio-port.js";
 export { NativeWorldSensingPort } from "./world-sensing-port.js";
 export { NativeScenePort } from "./scene-port.js";
 
@@ -92,9 +102,9 @@ export interface NativeAudioSetup {
  */
 export function createNativeAudio(
   host?: NativeAudioHost,
-  options: AudioDirectorOptions = {},
+  options: AudioDirectorOptions & NativeAudioPortOptions = {},
 ): NativeAudioSetup {
-  const port = new NativeAudioPort(host);
+  const port = new NativeAudioPort(host, options);
   return { director: new AudioDirector(port, options), port };
 }
 

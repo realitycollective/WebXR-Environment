@@ -126,6 +126,40 @@ describe("ThreeAudioPort", () => {
     await vi.waitFor(() => expect(held.ended).toHaveBeenCalledOnce());
   });
 
+  it("reaps a held voice whose buffer never arrives at all, and says so", () => {
+    // Distinct from the rejection above: here the loader's promise never
+    // settles either way - a hung fetch, not a failed one - so nothing but
+    // the shared start-timeout reaper ever ends this voice.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const listener = createTestListener().listener;
+    const scene = new Scene();
+    scene.add(listener);
+    const loader = { loadAsync: () => new Promise<AudioBuffer>(() => {}) };
+    const port = new ThreeAudioPort(listener, { loader, parent: scene, startTimeoutMs: 1000 });
+
+    const held = request();
+    port.start(held);
+    port.update(999);
+    expect(held.ended).not.toHaveBeenCalled();
+
+    port.update(1);
+    expect(held.ended).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("never reaps a voice once it has actually started, however long update() then runs", async () => {
+    const { port, loader, context } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    const voice = request();
+    port.start(voice);
+    port.update(1_000_000);
+    expect(voice.ended).not.toHaveBeenCalled();
+    expect(context.sources[0]?.stopped).toBeFalsy();
+  });
+
   it("reports the voice ended when three.js says playback finished", async () => {
     const { port, loader, context } = setup();
     const ready = port.load(CLICK);

@@ -67,9 +67,11 @@ describe("EnvironmentPort contract", () => {
 });
 
 describe("AudioPort contract", () => {
-  function makeSubject(): { port: NativeAudioPort; driver: AudioPortContractDriver } {
+  const START_TIMEOUT_MS = 25;
+
+  function makeSubject(): { port: NativeAudioPort; driver: AudioPortContractDriver; startTimeoutMs: number } {
     const host = createFakeAudioHost();
-    const port = new NativeAudioPort(host);
+    const port = new NativeAudioPort(host, { startTimeoutMs: START_TIMEOUT_MS });
     const driver: AudioPortContractDriver = {
       // The native host pushes the end of a voice through onVoiceEnded; a
       // stopped voice is untracked first, so driving one the port already
@@ -78,7 +80,7 @@ describe("AudioPort contract", () => {
         host.emitVoiceEnded(voiceId);
       },
     };
-    return { port, driver };
+    return { port, driver, startTimeoutMs: START_TIMEOUT_MS };
   }
 
   for (const contractCase of audioPortContractCases()) {
