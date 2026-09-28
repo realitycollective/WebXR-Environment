@@ -107,9 +107,12 @@ describe("EnvironmentPort contract", () => {
 });
 
 describe("AudioPort contract (ThreeAudioPort, via createXRBlocksAudio)", () => {
+  const START_TIMEOUT_MS = 25;
+
   function makeSubject(): {
     port: ReturnType<typeof createXRBlocksAudio>["port"];
     driver: AudioPortContractDriver;
+    startTimeoutMs: number;
   } {
     const context = fakeContext();
     AudioContext.setContext(context as unknown as globalThis.AudioContext);
@@ -117,7 +120,7 @@ describe("AudioPort contract (ThreeAudioPort, via createXRBlocksAudio)", () => {
     const scene = new Scene();
     scene.add(listener);
     const loader = { loadAsync: async () => fakeBuffer() };
-    const { port } = createXRBlocksAudio(listener, { loader, parent: scene });
+    const { port } = createXRBlocksAudio(listener, { loader, parent: scene, startTimeoutMs: START_TIMEOUT_MS });
     const driver: AudioPortContractDriver = {
       async end() {
         // A voice already cancelled by stop() while its buffer was still
@@ -127,7 +130,7 @@ describe("AudioPort contract (ThreeAudioPort, via createXRBlocksAudio)", () => {
         context.sources.at(-1)?.onended?.();
       },
     };
-    return { port, driver };
+    return { port, driver, startTimeoutMs: START_TIMEOUT_MS };
   }
 
   for (const contractCase of audioPortContractCases()) {

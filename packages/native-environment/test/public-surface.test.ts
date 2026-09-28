@@ -1,7 +1,8 @@
 /**
  * A platform adapter only implements the core's contracts. Its public
  * surface matches the other adapters: the core, the three ports and their
- * setup helpers. Slice reading stays internal.
+ * setup helpers, plus the host conformance kit a native app runs on its
+ * device. Slice reading stays internal.
  */
 import { describe, expect, it } from "vitest";
 import * as core from "@realitycollective/webxr-environment";
@@ -19,6 +20,7 @@ describe("native-environment public surface", () => {
       "createNativeEnvironment",
       "createNativeScenes",
       "createNativeWorldSensing",
+      "nativeEnvironmentHostConformanceCases",
     ]);
   });
 });

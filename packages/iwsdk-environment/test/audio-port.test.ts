@@ -164,6 +164,50 @@ describe("IWSDKAudioPort", () => {
     expect(world.created[0]?.destroyed).toBe(true);
   });
 
+  it("does not re-confirm a voice already known to be playing, on a later update()", () => {
+    const audio = stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world));
+
+    const voice = request();
+    port.start(voice);
+    const entity = world.created[0]!;
+    audio.playing.add(entity.id);
+
+    port.update(16);
+    // Still playing on a second tick: `voice.started` is already true, so
+    // this must skip the confirm branch entirely rather than re-run it.
+    port.update(16);
+
+    expect(voice.ended).not.toHaveBeenCalled();
+    expect(entity.destroyed).toBe(false);
+  });
+
+  it("skips a voice another one's ended callback already stopped, when its own timeout comes up in the same update()", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const audio = stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world), { startTimeoutMs: 100 });
+
+    const second = request({ voiceId: 2 });
+    const first = request({
+      voiceId: 1,
+      ended: vi.fn(() => port.stop(2)),
+    });
+    port.start(first);
+    port.start(second);
+
+    expect(() => port.update(101)).not.toThrow();
+
+    expect(first.ended).toHaveBeenCalledOnce();
+    expect(second.ended).not.toHaveBeenCalled();
+    // Only voice 1's timeout actually ran the warn-and-retire path; voice 2's
+    // was already gone from `#voices` by the time its own timeout came up -
+    // it was still retired, just via the reentrant `port.stop(2)` above, once.
+    expect(warn).toHaveBeenCalledOnce();
+    expect(audio.stopped).toEqual([world.created[0]!.id, world.created[1]!.id]);
+  });
+
   it("stops a voice on request, and ignores a stale id", () => {
     const audio = stubAudioUtils();
     const world = createFakeWorld();

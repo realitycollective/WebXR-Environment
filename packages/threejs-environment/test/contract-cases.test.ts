@@ -34,12 +34,14 @@ describe("EnvironmentPort contract", () => {
 });
 
 describe("AudioPort contract", () => {
-  function makeSubject(): { port: ThreeAudioPort; driver: AudioPortContractDriver } {
+  const START_TIMEOUT_MS = 25;
+
+  function makeSubject(): { port: ThreeAudioPort; driver: AudioPortContractDriver; startTimeoutMs: number } {
     const { listener, context } = createTestListener();
     const scene = new Scene();
     scene.add(listener);
     const loader = { loadAsync: async () => fakeBuffer() };
-    const port = new ThreeAudioPort(listener, { loader, parent: scene });
+    const port = new ThreeAudioPort(listener, { loader, parent: scene, startTimeoutMs: START_TIMEOUT_MS });
     const driver: AudioPortContractDriver = {
       async end() {
         // A voice already cancelled by stop() while its buffer was still
@@ -49,7 +51,7 @@ describe("AudioPort contract", () => {
         context.sources.at(-1)?.onended?.();
       },
     };
-    return { port, driver };
+    return { port, driver, startTimeoutMs: START_TIMEOUT_MS };
   }
 
   for (const contractCase of audioPortContractCases()) {

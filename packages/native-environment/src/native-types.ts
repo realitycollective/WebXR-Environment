@@ -70,12 +70,49 @@ export const NATIVE_HOST_GLOBAL = "__rcHost";
  * to.
  */
 export interface NativeEnvironmentHost {
+  /**
+   * Draw the sky, or none with `null`. The DIRECTOR decides every value: it
+   * has already interpolated a transition (four easings, `linear` by default,
+   * a zero default duration so a transition without one snaps) and applied
+   * suppression, so passthrough hands `null` here (sky and fog are the
+   * default suppressed slots, sky alone under depth occlusion) and the real
+   * spec again when it ends. The host draws exactly the kind named:
+   * `gradient` (top, bottom, optional equator colour at `horizon`, a fraction
+   * of the way up; `exponent` sharpens above 1, default 1; `intensity`
+   * default 1), `solid`, or `texture` (`src`, `intensity`, `rotationY` in
+   * radians, `blur` 0..1). Colours are linear `[r, g, b]` in 0..1. Called in
+   * slot order: sky, fog, ambient, key, ibl. IWSDK: `IWSDKEnvironmentPort.applySky`.
+   */
   applySky(sky: SkySpec | null): void;
+  /**
+   * Draw fog, or none with `null`: `linear` from `near` to `far` metres, or
+   * `exponential` with `density` per metre. A present fog with density 0 is
+   * invisible but still present, so a transition eases rather than snaps.
+   * IWSDK: `IWSDKEnvironmentPort.applyFog` (three.js `Fog` or `FogExp2`).
+   */
   applyFog(fog: FogSpec | null): void;
+  /** Uniform light: linear colour and a scalar intensity, or none. IWSDK: `applyAmbient`. */
   applyAmbient(light: AmbientLightSpec | null): void;
+  /**
+   * The one directional light: colour, intensity, and `direction`, the way
+   * the light TRAVELS in world space (`[0, -1, 0]` is overhead), with
+   * `castShadow` when the scene asks for shadows. IWSDK: `applyKeyLight`.
+   */
   applyKeyLight(light: KeyLightSpec | null): void;
+  /**
+   * The environment map PBR materials reflect, or none: `gradient`,
+   * `texture`, or `room` (the platform's own room probe). IWSDK: `applyIbl`
+   * (`IBLGradient`, `IBLTexture`, IWSDK's own room probe).
+   */
   applyIbl(ibl: IblSpec | null): void;
+  /**
+   * Depth occlusion on, or off with `null`. The director calls this only
+   * while passthrough is on, and REMEMBERS a spec set earlier, applying it
+   * when passthrough starts. A host without it is reported `unsupported`.
+   * IWSDK: `IWSDKEnvironmentPort.applyOcclusion`.
+   */
   applyOcclusion?(spec: OcclusionSpec | null): void;
+  /** Light estimation on, with every default resolved, or off with `null`. IWSDK has none (0.5.3 and 1.0.0). */
   applyLightEstimation?(spec: ResolvedLightEstimation | null): void;
   /** State changed for a sensor-backed feature: `occlusion`, `lightEstimation`, `depthTexture`. */
   onSensingReport?(callback: (report: SensingReport) => void): () => void;
@@ -101,12 +138,88 @@ export type NativeAudioVoiceRequest = Omit<AudioVoiceRequest, "ended">;
  * `setGain` stay optional, exactly as they are on `AudioPort`.
  */
 export interface NativeAudioHost {
+  /** Decode a cue's `src` ahead of its first play. Optional. */
   load?(cue: AudioCue): void | Promise<unknown>;
+  /**
+   * Start one voice. The DIRECTOR has already applied the policy: `overlap`
+   * (the default) starts another voice, `restart` stopped the sounding ones
+   * first, `ignore` never gets here while one sounds, and `minIntervalMs`
+   * throttling dropped a play too soon after the last. So the host starts
+   * exactly what it is handed: `gain` is absolute (master x bus x cue x play,
+   * never below 0), `loop` loops, `at` is a world position in metres or
+   * `null` for the listener, `spatial` is the attenuation or `null` for the
+   * host's defaults. One voice per request, never pooled or merged: IWSDK's
+   * `IWSDKAudioPort` gives each voice its own entity and pins its playback
+   * mode to overlap so its engine never second-guesses the director.
+   */
   start(request: NativeAudioVoiceRequest): void;
+  /** Stop one voice. Called at most once per voice, and never after `onVoiceEnded` named it. */
   stop(voiceId: number): void;
+  /** Change a sounding voice's absolute gain. Optional. */
   setGain?(voiceId: number, gain: number): void;
-  /** The host retired a voice of its own accord - it finished, or failed to start. */
+  /**
+   * The host retired a voice of its own accord: a one-shot finished, or a
+   * voice failed to start. Report a failed start promptly - `NativeAudioPort`
+   * also releases a voice locally once it has waited `startTimeoutMs`
+   * (10 000 ms by default, the same wait IWSDK uses) without hearing either
+   * way, but that is a backstop for a host that forgets, not a replacement
+   * for reporting the failure. Never for a voice `stop` ended.
+   */
   onVoiceEnded(callback: (voiceId: number) => void): () => void;
+}
+
+/**
+ * Test-only readbacks for the environment and audio host conformance kit
+ * (`nativeEnvironmentHostConformanceCases`). A shipping host may omit them.
+ *
+ * `applied(slot)` and `appliedOcclusion()` report what the host was HANDED -
+ * they prove the value crossed the boundary correctly, never that the host
+ * did anything sensible with it. The members below report what the host is
+ * actually DRAWING, derived from its own rendering state: a host can echo a
+ * gradient sky back through `applied("sky")` correctly and still be painting
+ * a flat colour, and only a readback that asks "what kind are you actually
+ * drawing" catches that. Every one of them is `undefined` before the related
+ * `apply*` was ever called.
+ */
+export interface NativeEnvironmentTestHost {
+  /** What the host is drawing for a slot now: the last value it was handed, `null` for none, `undefined` before any. */
+  applied(slot: "sky" | "fog" | "ambient" | "key" | "ibl"): unknown;
+  /** The occlusion spec the host is applying now, `null` for off, `undefined` if it was never handed one. */
+  appliedOcclusion(): OcclusionSpec | null | undefined;
+  /**
+   * The kind of sky the host is actually rendering right now - `"solid"`,
+   * `"gradient"` or `"texture"` - from its own drawing state, `null` for no
+   * sky. A host that renders every kind the same way (a gradient painted flat,
+   * a texture never bound) reports the wrong kind here even though
+   * `applied("sky")` shows the correct spec was received.
+   */
+  drawnSkyKind(): "solid" | "gradient" | "texture" | null | undefined;
+  /**
+   * The kind of fog the host is actually rendering right now - `"linear"` or
+   * `"exponential"` - from its own drawing state, `null` for no fog. See
+   * `drawnSkyKind` for why this is not the same question as `applied("fog")`.
+   */
+  drawnFogKind(): "linear" | "exponential" | null | undefined;
+  /**
+   * Whether the host's key light is actually casting a shadow right now, from
+   * its own rendering state - not merely the `castShadow` field of whatever
+   * `applyKeyLight` last received. `null` while there is no key light.
+   */
+  drawnKeyLightCastsShadow(): boolean | null | undefined;
+  /**
+   * Whether the host's materials are actually reflecting an environment map
+   * right now, from its own rendering state - not merely whether `applyIbl`
+   * was last handed a non-null spec.
+   */
+  drawnIblActive(): boolean | undefined;
+  /** The resolved light-estimation request the host's `applyLightEstimation` last received, `null` for off, `undefined` before any. */
+  appliedLightEstimation(): ResolvedLightEstimation | null | undefined;
+}
+
+/** Test-only readback for the audio host cases. */
+export interface NativeAudioTestHost {
+  /** Every voice the host is sounding now. */
+  voices(): readonly { readonly voiceId: number; readonly cueId: string }[];
 }
 
 /**
@@ -118,10 +231,15 @@ export interface NativeAudioHost {
  * not have this" reporting is what an app sees - see `world-sensing-port.ts`.
  */
 export interface NativeSensingHost {
+  /** Detect planes and meshes as `detection` says, every default resolved, or stop with `null`. Answer through `onSensingReport`. */
   setDetection?(detection: ResolvedWorldDetection | null): void;
+  /** Start a standing hit test for `request.id`; answers arrive through `onHits` under that id, world space, metres. */
   startHitTest?(request: HitTestRequest): void;
+  /** Stop a standing hit test. An unknown id is ignored. */
   stopHitTest?(id: string): void;
+  /** Anchor a world pose; resolve its id, or `null` when the runtime refuses. Never reject. */
   createAnchor?(pose: WorldPose): Promise<string | null>;
+  /** Remove an anchor. An unknown id is ignored. */
   removeAnchor?(id: string): void;
   /** The whole current set of planes. Anything absent is treated as gone. */
   onPlanes?(callback: (planes: readonly WorldPlane[]) => void): () => void;
@@ -156,8 +274,16 @@ export interface NativeBuiltScene {
  * neither rendered nor hit-testable.
  */
 export interface NativeScenesHost {
-  /** Build a scene, shown or hidden. Reject when it cannot be built, leaving nothing behind. */
+  /**
+   * Build a scene, shown or hidden. Reject when it cannot be built, leaving
+   * nothing behind. Report every node's id, repeats included: the manager
+   * fails a load whose ids repeat (and destroys what was built), exactly as
+   * over IWSDK's port. Hidden means neither rendered nor hit-testable, as
+   * IWSDK hides a scene three ways (visibility, raycast layers, pointer
+   * events).
+   */
   build(def: SceneDefinition, visible: boolean): Promise<NativeBuiltScene>;
+  /** Show or hide a built scene without rebuilding it. */
   setVisible(scene: string, visible: boolean): void;
   /** Remove a scene and everything still in it. */
   destroy(scene: string): void;

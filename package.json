@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
-    "@iwsdk/core": "0.5.3",
+    "@iwsdk/core": "1.0.0",
     "@types/node": "^22.20.1",
     "@types/three": "0.185.4",
     "@vitest/coverage-v8": "^4.1.8",

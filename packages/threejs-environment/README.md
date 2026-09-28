@@ -50,9 +50,11 @@ director.transition("dusk");
 
 Everything the port creates is parented under one named `Group` (`port.root`), and `dispose()` gives all of it back. It creates **no geometry** - every one of those is a three.js facility with no app-side equivalent. A floor is a mesh, so a floor is yours; `demos/playground` builds its own in four lines.
 
-## Two things worth knowing
+## Three things worth knowing
 
 **The first press is not silent.** A play that arrives before its buffer has decoded is held and started when the decode lands, unless it was stopped in the meantime. Dropping it instead is the reason the first press of every button in a session so often makes no sound.
+
+**A hold does not wait forever.** A decode that never lands - a hung fetch, not just a failed one - is released after `startTimeoutMs` (`ThreeAudioPortOptions.startTimeoutMs`, 10 s by default) with a warning, the same rule and the same default `iwsdk-environment` uses, shared through `AudioStartReaper` in `@realitycollective/webxr-environment`. Call `audioDirector.update(deltaMs)` every frame for this to run - it is also what drives a live mix change and every other port's own polling, so an app that already ticks the director gets this for free.
 
 **Autoplay.** Browsers refuse to start an `AudioContext` outside a user gesture. Call `audioPort.resume()` from the same handler that enters XR (or from your Enter-VR button) - a suspended context makes every voice silently succeed.
 

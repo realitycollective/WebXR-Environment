@@ -127,6 +127,9 @@ export { SCENE_CONTRACT_FIXTURES, sceneManagerContractCases } from "./scene-cont
 export type { AudioDirectorOptions } from "./audio-director.js";
 export { AudioDirector } from "./audio-director.js";
 
+export type { AudioStartReaperOptions, AudioStartReaperRequest } from "./audio-start-reaper.js";
+export { AudioStartReaper, DEFAULT_AUDIO_START_TIMEOUT_MS } from "./audio-start-reaper.js";
+
 export type { EasingFunction, EasingName } from "./math.js";
 export {
   clamp,

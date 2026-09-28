@@ -1,7 +1,7 @@
 /**
  * `createSystem` from `@iwsdk/core`, with its return type written out.
  *
- * Why this file exists. IWSDK 0.5.3 declares `createSystem` in
+ * Why this file exists. IWSDK (0.5.3, and still 1.0.0) declares `createSystem` in
  * `dist/ecs/system.d.ts` as returning `SystemConstructor<S, Q, World, System<S, Q>>`,
  * and that file imports `World` from './world' with no extension, the only
  * extensionless relative import in the package. This repository builds with

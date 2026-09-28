@@ -36,6 +36,7 @@ import { SENSING_FEATURES } from "./sensing.js";
 import type { HitTestRequest, WorldAnchor, WorldMesh, WorldPlane } from "./world-sensing.js";
 import type { WorldSensingPort, WorldSensingPortHost } from "./world-sensing-director.js";
 import type { AudioPort, EnvironmentPort } from "./ports.js";
+import { DEFAULT_AUDIO_START_TIMEOUT_MS } from "./audio-start-reaper.js";
 
 /** Every value {@link SensingReport.state} may legally hold. */
 const SENSING_STATES: readonly SensingState[] = ["unsupported", "unavailable", "pending", "active"];
@@ -243,6 +244,13 @@ export interface AudioPortContractSubject {
   /** The port under test. Fresh per case: cases start voices and never clean up. */
   readonly port: AudioPort;
   readonly driver: AudioPortContractDriver;
+  /**
+   * The `startTimeoutMs` the subject's port was actually configured with -
+   * every adapter composes an `AudioStartReaper` with its own default or an
+   * override, and the "never starts" case below needs to know how long to
+   * wait. Omit it to say the adapter left it at `DEFAULT_AUDIO_START_TIMEOUT_MS`.
+   */
+  readonly startTimeoutMs?: number;
 }
 
 /** One check an {@link AudioPort} implementation must pass. */
@@ -353,6 +361,28 @@ const AUDIO_CASES: readonly AudioPortContractCase[] = [
       } catch (error) {
         throw new Error(`a second dispose() must be a no-op, it threw: ${String(error)}`);
       }
+    },
+  },
+  {
+    name: "a voice that never starts is released once the port's own start timeout elapses, when the port implements update",
+    run(subject) {
+      // A port with no `update` has no way to poll for a stuck voice on its
+      // own - it is not one this case can hold to the rule; see
+      // `AudioStartReaper`'s file comment for why every current adapter has
+      // one now.
+      if (subject.port.update === undefined) return;
+      const timeoutMs = subject.startTimeoutMs ?? DEFAULT_AUDIO_START_TIMEOUT_MS;
+      let calls = 0;
+      // Never awaited: a port whose start is asynchronous (a buffer still
+      // decoding, a promise to a native host) gets no chance to settle before
+      // update() is driven past the timeout, which is the whole point - this
+      // is exactly what "never starts" looks like from the port's own side.
+      subject.port.start(contractRequest({ voiceId: 106, ended: () => (calls += 1) }));
+      subject.port.update(timeoutMs + 1);
+      assert(
+        calls === 1,
+        `a voice that never starts must be released once its start timeout (${timeoutMs}ms) elapses, ended was called ${calls} time(s)`,
+      );
     },
   },
 ];
