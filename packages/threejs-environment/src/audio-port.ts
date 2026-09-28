@@ -34,7 +34,7 @@
  */
 import { Audio, AudioListener, AudioLoader, Object3D, PositionalAudio, Vector3 } from "three";
 import type { AudioCue, AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
-import { AudioStartReaper } from "@realitycollective/webxr-environment";
+import { AudioStartReaper, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 
 export interface ThreeAudioPortOptions {
   /**
@@ -218,20 +218,20 @@ export class ThreeAudioPort implements AudioPort {
       // The port's own reference distance is the FLOOR, not the law: a cue
       // that describes how far it carries beats one number applied to every
       // sound in the title, which is what this adapter used to do.
-      const attenuation = request.spatial;
-      spatial.setRefDistance(attenuation?.refDistance ?? this.#refDistance);
-      if (attenuation?.rolloffFactor !== undefined) {
-        spatial.setRolloffFactor(attenuation.rolloffFactor);
-      }
-      if (attenuation?.maxDistance !== undefined) spatial.setMaxDistance(attenuation.maxDistance);
-      if (attenuation?.model !== undefined) spatial.setDistanceModel(attenuation.model);
+      // Every field arrives resolved from the core defaults (the director's
+      // `resolveAudioSpatial`), so the same cue attenuates the same on every
+      // platform; the port's own `refDistance` option stands in only for a
+      // request built by hand with no attenuation at all.
+      const attenuation = request.spatial ?? resolveAudioSpatial({ refDistance: this.#refDistance });
+      spatial.setRefDistance(attenuation.refDistance);
+      spatial.setRolloffFactor(attenuation.rolloffFactor);
+      spatial.setMaxDistance(attenuation.maxDistance);
+      spatial.setDistanceModel(attenuation.model);
       // Radians in the contract, degrees at the panner. three.js orients a
       // positional sound along its own +Z, so the holder is turned to point
       // that axis the way the app said the sound travels.
-      const cone = attenuation?.cone;
-      if (cone !== undefined) {
-        spatial.setDirectionalCone(toDegrees(cone.inner), toDegrees(cone.outer), cone.outsideGain);
-      }
+      const cone = attenuation.cone;
+      spatial.setDirectionalCone(toDegrees(cone.inner), toDegrees(cone.outer), cone.outsideGain);
       // `?? null` rather than a bare null check: a request built by hand - a
       // test, or an app driving the port directly - carries `undefined` here,
       // and a NaN quaternion is a silent way to lose a sound.

@@ -55,9 +55,11 @@ export type CuePolicy =
  * every adapter apply one constant to every sound, which is the opposite of
  * the job: a footstep and a waterfall do not fall off at the same rate.
  *
- * Omitted fields are the host's own defaults, which is why there is no
- * "resolved" form of this. The core has no opinion about how far a sound
- * carries.
+ * Omitted fields take `AUDIO_ATTENUATION_DEFAULTS`, Web Audio's own panner
+ * defaults, the values every web host inherited without saying so and a
+ * native host had no way to know: the director resolves them
+ * (`resolveAudioSpatial`) before a request reaches a port, so a positional
+ * voice carries the same attenuation on every platform.
  */
 export interface AudioSpatial {
   /** Metres at which the sound is at full volume. */
@@ -101,6 +103,66 @@ export interface AudioCone {
   /** How loud it still is outside the outer cone, 0..1. */
   readonly outsideGain: number;
 }
+
+/**
+ * The attenuation a positional voice has when its cue says nothing: Web
+ * Audio's `PannerNode` defaults, which IWSDK's `AudioSource` and three.js's
+ * `PositionalAudio` both pass straight through. Inverse distance, full
+ * volume within 1 m, falling as `1 / (1 + (d - 1))` beyond it out to 10 km,
+ * and a cone of 360 degrees inside and out (omnidirectional) with nothing
+ * left outside it. Angles here are radians, as `AudioCone` states.
+ */
+export const AUDIO_ATTENUATION_DEFAULTS: Readonly<Required<Omit<AudioSpatial, "cone">> & { readonly cone: AudioCone }> = Object.freeze({
+  refDistance: 1,
+  rolloffFactor: 1,
+  maxDistance: 10000,
+  model: "inverse",
+  cone: Object.freeze({ inner: 2 * Math.PI, outer: 2 * Math.PI, outsideGain: 0 }),
+});
+
+/** A cue's attenuation with every omitted field filled from `AUDIO_ATTENUATION_DEFAULTS`. */
+export function resolveAudioSpatial(spatial: AudioSpatial | null | undefined): Required<AudioSpatial> {
+  const cone = spatial?.cone ?? AUDIO_ATTENUATION_DEFAULTS.cone;
+  return {
+    refDistance: spatial?.refDistance ?? AUDIO_ATTENUATION_DEFAULTS.refDistance,
+    rolloffFactor: spatial?.rolloffFactor ?? AUDIO_ATTENUATION_DEFAULTS.rolloffFactor,
+    maxDistance: spatial?.maxDistance ?? AUDIO_ATTENUATION_DEFAULTS.maxDistance,
+    model: spatial?.model ?? AUDIO_ATTENUATION_DEFAULTS.model,
+    cone: { inner: cone.inner, outer: cone.outer, outsideGain: cone.outsideGain },
+  };
+}
+
+/**
+ * The gain factor (0..1) distance alone leaves a positional voice with, by
+ * the Web Audio distance models every host maps to (`PannerNode`
+ * `distanceModel`): the rule a native host applies and the conformance kit
+ * checks. `distance` is metres from the listener; it is clamped to
+ * `refDistance` below and, for `"linear"` and `"exponential"`, to
+ * `maxDistance` above.
+ */
+export function distanceGain(distance: number, spatial: AudioSpatial | null | undefined): number {
+  const { refDistance, rolloffFactor, maxDistance, model } = resolveAudioSpatial(spatial);
+  const d = Math.max(distance, refDistance);
+  if (model === "linear") {
+    const clamped = Math.min(d, maxDistance);
+    return Math.max(0, 1 - (rolloffFactor * (clamped - refDistance)) / Math.max(maxDistance - refDistance, 1e-9));
+  }
+  if (model === "exponential") {
+    return Math.pow(Math.min(d, maxDistance) / refDistance, -rolloffFactor);
+  }
+  return refDistance / (refDistance + rolloffFactor * (d - refDistance));
+}
+
+/**
+ * The listener rule: the listener is the viewer's head. Its position and
+ * orientation are the head pose every frame, so a positional voice is heard
+ * from where the viewer is and facing the way the viewer faces. On the web
+ * this is the `AudioListener` on the camera (IWSDK's `AudioSystem`, three.js's
+ * `AudioListener`); a native host places its engine's listener at the head
+ * pose its `input` slice reports, every frame. Stated as a value so a host
+ * can be checked against it.
+ */
+export const AUDIO_LISTENER_RULE = "head" as const;
 
 /** A sound the app knows how to make. Registered once, played by id. */
 export interface AudioCue {
@@ -176,10 +238,11 @@ export interface AudioVoiceRequest {
   /** World position, or null for playback from the listener. */
   readonly at: Vec3 | null;
   /**
-   * The cue's attenuation, or null when it named none and the port should use
-   * its own defaults. Resolved here so a port never reads the cue for policy.
+   * The attenuation for a positional voice, every field resolved
+   * (`resolveAudioSpatial`), or null for a voice played from the listener.
+   * A port applies exactly these values and never its engine's defaults.
    */
-  readonly spatial: AudioSpatial | null;
+  readonly spatial: Required<AudioSpatial> | null;
   /** Which way this voice faces, or null. See `PlayOptions.facing`. */
   readonly facing: Vec3 | null;
   /**

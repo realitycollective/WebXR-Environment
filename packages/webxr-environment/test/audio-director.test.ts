@@ -1,3 +1,4 @@
+import { AUDIO_ATTENUATION_DEFAULTS, resolveAudioSpatial } from "../src/index.js";
 import { describe, expect, it } from "vitest";
 import type { AudioCue } from "@realitycollective/webxr-environment";
 import { AudioDirector } from "@realitycollective/webxr-environment";
@@ -331,20 +332,27 @@ describe("AudioDirector", () => {
 });
 
 describe("spatial attenuation", () => {
-  it("resolves the cue's fall-off onto the request, and null when it has none", () => {
+  it("resolves the cue's fall-off onto the request with the core defaults, and null for a voice from the listener", () => {
     const port = new RecordingAudioPort();
     const director = new AudioDirector(port, {
       cues: [
         { id: "far", src: "far.ogg", positional: true, spatial: { refDistance: 5, model: "linear" } },
         { id: "near", src: "near.ogg", positional: true },
+        { id: "ui", src: "ui.ogg" },
       ],
     });
 
     director.play("far");
     director.play("near");
+    director.play("ui");
+    director.play("ui", { at: [1, 0, 0] });
 
-    expect(port.started[0]?.request.spatial).toEqual({ refDistance: 5, model: "linear" });
-    expect(port.started[1]?.request.spatial).toBeNull();
+    expect(port.started[0]?.request.spatial).toEqual({ ...AUDIO_ATTENUATION_DEFAULTS, refDistance: 5, model: "linear" });
+    // A positional cue that names nothing carries the defaults, so every platform attenuates it alike.
+    expect(port.started[1]?.request.spatial).toEqual(resolveAudioSpatial(null));
+    expect(port.started[2]?.request.spatial).toBeNull();
+    // A play placed in the world is positional even when its cue is not.
+    expect(port.started[3]?.request.spatial).toEqual(resolveAudioSpatial(null));
   });
 
   it("keeps the cone with the cue and the facing with the play", () => {

@@ -17,6 +17,7 @@
  * Runner-free, like the core suites: a case resolves on success and rejects
  * with a plain `Error` naming its row otherwise.
  */
+import type { WorldPose } from "@realitycollective/webxr-environment";
 import {
   AudioDirector,
   DEFAULT_OCCLUSION,
@@ -27,8 +28,7 @@ import {
   type AudioCue,
   type FogSpec,
   type KeyLightSpec,
-  type SkySpec,
-} from "@realitycollective/webxr-environment";
+  type SkySpec, distanceGain } from "@realitycollective/webxr-environment";
 import { NativeAudioPort } from "./audio-port.js";
 import { NativeEnvironmentPort } from "./environment-port.js";
 import type {
@@ -47,6 +47,10 @@ export interface NativeEnvironmentHostConformanceSetup {
   audioTest: NativeAudioTestHost | undefined;
   /** A short sound the host can play, as a cue `src`. */
   cueSrc: string;
+  /** An equirectangular sky image the host can load, as a texture sky `src`. Default `"kit://sky.hdr"`, a name the app resolves. */
+  skySrc?: string;
+  /** The viewer's head pose now, from the `input` slice, for the listener case. Optional; that case fails without it. */
+  headPose?: () => WorldPose;
 }
 
 /** One check a native host must pass. `name` is `environment/<row>` or `audio/<row>`. */
@@ -164,16 +168,24 @@ export function nativeEnvironmentHostConformanceCases(): NativeEnvironmentHostCo
         if (!same(environmentTest.appliedOcclusion(), director.occlusion)) {
           fail(name, `on passthrough the host applies ${JSON.stringify(environmentTest.appliedOcclusion())}, expected the remembered ${JSON.stringify(director.occlusion)}`);
         }
+        // Leave the host as it was found: occlusion off and passthrough off,
+        // so a second run on the same host starts from nothing applied.
+        director.setOcclusion(null);
+        director.setPassthrough(false);
+        if (environmentTest.appliedOcclusion()) {
+          fail(name, "occlusion stayed applied after it was cleared; the host must turn it off when told");
+        }
       } finally {
         director.dispose();
       }
     }),
-    hostCase("environment/every sky kind is drawn as the kind it was given, not flattened to one", ({ environment, environmentTest }, name) => {
+    hostCase("environment/every sky kind is drawn as the kind it was given, not flattened to one", (setup, name) => {
+      const { environment, environmentTest } = setup;
       const director = new EnvironmentDirector(new NativeEnvironmentPort(environment));
       const variants: readonly SkySpec[] = [
         { kind: "solid", colour: [0.2, 0.4, 0.8] },
         { kind: "gradient", top: [0.1, 0.2, 0.3], bottom: [0.4, 0.5, 0.6] },
-        { kind: "texture", src: "kit://sky.hdr" },
+        { kind: "texture", src: setup.skySrc ?? "kit://sky.hdr" },
       ];
       try {
         director.apply(NOON);
@@ -278,6 +290,41 @@ export function nativeEnvironmentHostConformanceCases(): NativeEnvironmentHostCo
         }
       },
     ),
+    hostCase("audio/a positional voice attenuates by the core defaults, inverse from 1 m", (setup, name) => {
+      const a = audioOf(name, setup);
+      const read = setup.audioTest?.voiceDistanceGain;
+      const listener = setup.audioTest?.listenerPose;
+      if (typeof read !== "function" || typeof listener !== "function") {
+        fail(name, "the test host has no voiceDistanceGain or listenerPose readback, so attenuation cannot be checked");
+      }
+      try {
+        a.director.register(a.cue("rc-kit-near", { positional: true }));
+        a.director.register(a.cue("rc-kit-far", { positional: true }));
+        const origin = listener.call(setup.audioTest).position;
+        // A looping cue always starts a voice: the director drops only a silent one-shot, a throttled or an ignored play.
+        const near = a.director.play("rc-kit-near", { at: [origin[0] + 0.5, origin[1], origin[2]] })!;
+        const far = a.director.play("rc-kit-far", { at: [origin[0] + 3, origin[1], origin[2]] })!;
+        const expectedNear = distanceGain(0.5, null);
+        const expectedFar = distanceGain(3, null);
+        const gotNear = read.call(setup.audioTest, near.id);
+        const gotFar = read.call(setup.audioTest, far.id);
+        if (Math.abs(gotNear - expectedNear) > 0.05) fail(name, `a voice 0.5 m away must be at full volume (${expectedNear}), the host has it at ${gotNear}`);
+        if (Math.abs(gotFar - expectedFar) > 0.05) fail(name, `a voice 3 m away must be at ${expectedFar.toFixed(3)} by the inverse model from 1 m, the host has it at ${gotFar}`);
+      } finally {
+        a.director.dispose();
+      }
+    }),
+    hostCase("audio/the listener is at the viewer's head", (setup, name) => {
+      const listener = setup.audioTest?.listenerPose;
+      if (typeof listener !== "function") fail(name, "the test host has no listenerPose readback");
+      if (typeof setup.headPose !== "function") fail(name, "the kit was given no headPose; pass the input slice's head pose");
+      const head = setup.headPose();
+      const at = listener.call(setup.audioTest);
+      const apart = Math.hypot(at.position[0] - head.position[0], at.position[1] - head.position[1], at.position[2] - head.position[2]);
+      if (apart > 0.01) fail(name, `the listener is ${apart.toFixed(3)} m from the head; it must follow the head every frame`);
+      const dot = at.orientation[0] * head.orientation[0] + at.orientation[1] * head.orientation[1] + at.orientation[2] * head.orientation[2] + at.orientation[3] * head.orientation[3];
+      if (Math.abs(dot) < 0.999) fail(name, "the listener does not face the way the head faces");
+    }),
     hostCase("audio/overlap, the default, starts another voice", (setup, name) => {
       const a = audioOf(name, setup);
       try {

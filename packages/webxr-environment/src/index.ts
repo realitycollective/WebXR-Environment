@@ -38,7 +38,7 @@ export type {
   CuePolicy,
   PlayOptions,
 } from "./audio.js";
-export { DEFAULT_BUS, DEFAULT_BUSES } from "./audio.js";
+export { AUDIO_ATTENUATION_DEFAULTS, AUDIO_LISTENER_RULE, DEFAULT_BUS, DEFAULT_BUSES, distanceGain, resolveAudioSpatial } from "./audio.js";
 
 export type { AudioPort, EnvironmentPort } from "./ports.js";
 
