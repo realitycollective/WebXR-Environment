@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AudioCue, AudioVoiceRequest } from "@realitycollective/webxr-environment";
 import { NativeAudioPort } from "../src/audio-port.js";
 import { createFakeAudioHost } from "./helpers.js";
 
 const CLICK: AudioCue = { id: "click", src: "audio/click.mp3" };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function request(overrides: Partial<AudioVoiceRequest> = {}): AudioVoiceRequest & {
   ended: ReturnType<typeof vi.fn>;
