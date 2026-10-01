@@ -12,6 +12,11 @@ harness/native/build/
 coverage/
 *.lcov
 
+# Local run output - never commit: agent scratch files, logs and recorded input traces
+.scratch/
+/traces/
+*.log
+
 # Output of `npm pack`
 *.tgz
 dist-tarballs/
