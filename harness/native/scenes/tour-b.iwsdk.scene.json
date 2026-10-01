@@ -1,0 +1,40 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "metadata": {
+    "com.realitycollective.environment-harness": "The Environment harness tour scene \"tour-b\", generated from harness/native/src/tour-layout.ts by harness/native/scripts/write-scenes.mjs."
+  },
+  "resources": {},
+  "nodes": [
+    {
+      "id": "tour-b-pillar",
+      "name": "tour-b-pillar",
+      "transform": {
+        "position": [
+          0.8,
+          0.6,
+          -2
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "tour-b-pillar"
+      }
+    },
+    {
+      "id": "tour-b-orb",
+      "name": "tour-b-orb",
+      "transform": {
+        "position": [
+          0.8,
+          1.45,
+          -2
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "tour-b-orb"
+      }
+    }
+  ]
+}

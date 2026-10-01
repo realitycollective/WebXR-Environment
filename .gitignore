@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# The native harness compile and the conversion pipeline write here (bundles, Hermes bytecode, APKs)
+harness/native/build/
+
 # Test output
 coverage/
 *.lcov

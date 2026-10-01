@@ -1,0 +1,40 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "metadata": {
+    "com.realitycollective.environment-harness": "The Environment harness tour scene \"tour-a\", generated from harness/native/src/tour-layout.ts by harness/native/scripts/write-scenes.mjs."
+  },
+  "resources": {},
+  "nodes": [
+    {
+      "id": "tour-a-block",
+      "name": "tour-a-block",
+      "transform": {
+        "position": [
+          -0.8,
+          0.25,
+          -2
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "tour-a-block"
+      }
+    },
+    {
+      "id": "tour-a-ring",
+      "name": "tour-a-ring",
+      "transform": {
+        "position": [
+          -0.8,
+          1.2,
+          -2
+        ]
+      },
+      "content": {
+        "type": "asset",
+        "asset": "tour-a-ring"
+      }
+    }
+  ]
+}

@@ -1,12 +1,18 @@
 # @realitycollective/native-environment
 
-The **native host adapter** for the Reality Collective WebXR Environment Extensions. For a native app - OpenXR on Quest, CompositorServices on visionOS, or any other shell - that embeds a JavaScript engine such as Hermes, owns rendering and audio itself, and installs one object, `globalThis.__rcHost`, before the bundle is evaluated. See `NATIVE_HOST_CONTRACT.md` in the repository root for the contract every family's `native-*` package reads from.
+The **native host adapter** for the Reality Collective WebXR Environment Extensions. For a native app - OpenXR on Quest, CompositorServices on visionOS, or any other shell - that embeds a JavaScript engine such as Hermes, owns rendering and audio itself, and installs one object, `globalThis.__rcHost`, before the bundle is evaluated. `src/native-types.ts` states every slice this package reads, with each member's units and meaning.
 
 It re-exports the engine-free core, so this is the only package you install.
 
 ```bash
 npm install @realitycollective/native-environment
 ```
+
+It serves every port the core defines: the visual environment, sensing, world sensing, audio and scene management (`createNativeScenes` over the host's `scenes` slice), and ships `nativeEnvironmentHostConformanceCases()` to prove a host on its device.
+
+## Tested on a headset
+
+A native app built with this package passed on a Meta Quest 3 on 1 October 2026, played by a person and checked by its conformance kit. No known issues.
 
 ## No asset decoding here
 
@@ -92,6 +98,6 @@ for (const hostCase of nativeEnvironmentHostConformanceCases()) {
 
 Each case drives the real core director over the host and reads back what the host draws or sounds. A host with no `applyOcclusion`, or no `audio` slice, fails the cases that need them.
 
-## Licence
+## License
 
-MIT.
+MIT - see [LICENSE](./LICENSE).

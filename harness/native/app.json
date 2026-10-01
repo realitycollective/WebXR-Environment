@@ -1,0 +1,25 @@
+{
+  "id": "rc-environment-harness",
+  "name": "RC Environment Harness",
+  "applicationId": "com.realitycollective.harness.environment",
+  "version": "0.1.1",
+  "versionCode": 1,
+  "entry": "entry.ts",
+  "web": "../..",
+  "content": {
+    "scenes": "./scenes",
+    "sceneAssets": "./scene-assets.ts"
+  },
+  "targets": [
+    "quest"
+  ],
+  "capabilities": [
+    "audio",
+    "passthrough"
+  ],
+  "checks": {
+    "run": [
+      { "mode": "kits", "ticks": 600 }
+    ]
+  }
+}

@@ -46,6 +46,7 @@ director.transition("dusk");
 - **Depth occlusion** - three.js's OWN depth sensing, which has drawn an occlusion mesh before the scene since r158. Pass `renderer` in the options; the port then decides whether the request can be served (a session, `depth-sensing` enabled, gpu-optimized depth, a scope three.js can honour) and reports the reason when it cannot. There is no hand-rolled depth pass here on purpose: duplicating the renderer's GL state handling is how caches start lying.
 - **Light estimation** - a WebXR light probe, read from the current `XRFrame` and converted to ordinary ambient and key specs. Not `XREstimatedLight`, so the estimate is data the app can read, blend or ignore rather than two lights in a `Group` only the renderer can see. Pass a `reflection` hook - two lines around `XRWebGLBinding.getReflectionCubeMap` - and the measured cube map arrives as `ibl: { kind: "estimated" }` too; without one, ambient and key still work and the report says the reflections were not measured.
 - **The room** - `createThreeWorldSensing(renderer)` reads planes, meshes, anchors and hit-test results straight from the `XRFrame`, in the reference space three.js draws in, so a pose can be handed to `object.position.set(...)` unchanged. A mesh is measured once per `lastChangedTime`, because the alternative is walking a room scan every frame. A hit test with `space: "left"` or `"right"` is cast from that hand's own `targetRaySpace` - it waits while there is no such input source and unbinds when the hand goes - and every hit carries the distance from where the ray started.
+- **Scenes** - `createThreeScenes(root, options)` puts the core's `SceneManager` over `ThreeScenePort`: each scene is a group under the root, loaded with `GLTFLoader` by default or an app's own loader, with `assets` supplying what `instantiate` spawns. Preloaded scenes are built hidden and neither drawn nor hit-testable until activated.
 - **Audio** - `Audio` / `PositionalAudio` over the listener's Web Audio context, with per-cue reference distance, rolloff, maximum distance, distance model and cone. A cue with a `cone` and a play with a `facing` become `setDirectionalCone` plus a turned holder: radians in the contract, degrees at the panner, +Z pointed the way the sound travels.
 
 Everything the port creates is parented under one named `Group` (`port.root`), and `dispose()` gives all of it back. It creates **no geometry** - every one of those is a three.js facility with no app-side equivalent. A floor is a mesh, so a floor is yours; `demos/playground` builds its own in four lines.
@@ -54,7 +55,7 @@ Everything the port creates is parented under one named `Group` (`port.root`), a
 
 **The first press is not silent.** A play that arrives before its buffer has decoded is held and started when the decode lands, unless it was stopped in the meantime. Dropping it instead is the reason the first press of every button in a session so often makes no sound.
 
-**A hold does not wait forever.** A decode that never lands - a hung fetch, not just a failed one - is released after `startTimeoutMs` (`ThreeAudioPortOptions.startTimeoutMs`, 10 s by default) with a warning, the same rule and the same default `iwsdk-environment` uses, shared through `AudioStartReaper` in `@realitycollective/webxr-environment`. Call `audioDirector.update(deltaMs)` every frame for this to run - it is also what drives a live mix change and every other port's own polling, so an app that already ticks the director gets this for free.
+**A hold does not wait forever.** A decode that never lands - a hung fetch, not just a failed one - is released after `startTimeoutMs` (`ThreeAudioPortOptions.startTimeoutMs`, 10 s by default) with a warning, the same rule and the same default `iwsdk-environment` uses, shared through `AudioStartReaper` in `@realitycollective/webxr-environment`. Call the audio director's `update(deltaMs)` (`audio.update` above) every frame for this to run - it is also what drives a live mix change and every other port's own polling, so an app that already ticks the director gets this for free.
 
 **Autoplay.** Browsers refuse to start an `AudioContext` outside a user gesture. Call `audioPort.resume()` from the same handler that enters XR (or from your Enter-VR button) - a suspended context makes every voice silently succeed.
 
@@ -62,6 +63,6 @@ Everything the port creates is parented under one named `Group` (`port.root`), a
 
 `three >= 0.170.0`. Meta's `super-three` fork satisfies this and is what the workspace develops against.
 
-## Licence
+## License
 
-MIT.
+MIT - see [LICENSE](./LICENSE).

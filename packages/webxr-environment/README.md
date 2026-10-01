@@ -2,11 +2,23 @@
 
 The engine-free core of the Reality Collective **WebXR Environment Extensions**: the platform features that make up the world around the player, and the playback of sound.
 
-You do not install this package directly. Install the adapter for the engine you already use - [`@realitycollective/threejs-environment`](https://www.npmjs.com/package/@realitycollective/threejs-environment) or [`@realitycollective/iwsdk-environment`](https://www.npmjs.com/package/@realitycollective/iwsdk-environment) - and it re-exports everything here.
+You do not install this package directly. Install the adapter for the engine you already use - [`@realitycollective/threejs-environment`](https://www.npmjs.com/package/@realitycollective/threejs-environment), [`@realitycollective/iwsdk-environment`](https://www.npmjs.com/package/@realitycollective/iwsdk-environment), [`@realitycollective/xrblocks-environment`](https://www.npmjs.com/package/@realitycollective/xrblocks-environment) or, for a native app, [`@realitycollective/native-environment`](https://www.npmjs.com/package/@realitycollective/native-environment) - and it re-exports everything here.
+
+## Capabilities
+
+| Area | Detail |
+| --- | --- |
+| **Visual environment** | `EnvironmentDirector`: sky (gradient, solid, texture), fog (linear, exponential), ambient and key light, image-based lighting (gradient, texture, room, estimated), named presets (`STOCK_PRESETS`: `VOID`, `DAWN`, `NOON`, `DUSK`, `NIGHT`, `OVERCAST`), eased transitions, passthrough suppression |
+| **Sensing** | Depth occlusion (`setOcclusion`), light estimation (`setLightEstimation`), and honest reports per feature (`getSensing`, `onSensing`: `unsupported`, `unavailable`, `pending`, `active`) |
+| **World sensing** | `WorldSensingDirector`: planes, meshes, anchors and standing hit tests, reported as they appear, move and go |
+| **Audio** | `AudioDirector`: cue registry, bus mix, retrigger policy, voices, spatial cones and facing, attenuation defaults (`AUDIO_ATTENUATION_DEFAULTS`), and `AudioStartReaper` for a voice that never starts |
+| **Scene management** | `SceneManager` over a `ScenePort` per host: a registered scene list, single and additive loads, preload and activate, a scene stack with one active scene, persistent nodes, instances, `bindNode`, and an environment preset per scene. See [Managing scenes](#managing-scenes) |
+| **Conformance suites** | `environmentPortContractCases()`, `audioPortContractCases()`, `worldSensingPortContractCases()` and `sceneManagerContractCases()` (with `SCENE_CONTRACT_FIXTURES`), shipped as data so any adapter proves itself in its own test runner |
+| **Platforms** | three.js, Meta IWSDK (the reference), Google XR Blocks and native hosts (OpenXR on Quest, visionOS) all implement every port above; the native binding ships a host conformance kit |
 
 ## What it is
 
-Two directors and two ports.
+Three directors, a scene manager, and a port for each.
 
 - **`EnvironmentDirector`** owns a sky (gradient, solid colour or an authored image), fog, an ambient light, a key light and an environment map for image-based lighting, described as plain data. It interpolates between named presets, pushes only what changed to the adapter, and suppresses the sky and fog while passthrough is showing.
 - **`EnvironmentDirector`** also owns the two sensor-backed features. `setOcclusion(spec)` asks for real-world depth and reaches the port only while passthrough is on; `setLightEstimation(true)` lets the host's measurement of the room take over the ambient, key and ibl slots while it is measuring, as a layer over what the app asked for rather than an edit to it. `setPassthrough` takes a WebXR blend mode as well as a boolean, because `additive` displays add what you draw to the real world and a dark fog is then invisible.
@@ -18,7 +30,7 @@ Two directors and two ports.
 
 Every slot is a **platform facility** each host exposes differently - three.js has `scene.background` and `Fog`, IWSDK has `DomeGradient` and `AmbientLightComponent`, the next host will have something else. Presenting one description all of them can be driven from is the whole job.
 
-Neither owns a loop. `update(deltaMs)` is called by whatever already runs per frame, which is what makes an eight-second dusk a five-line unit test rather than a stopwatch and a headset.
+None of them owns a loop. `update(deltaMs)` is called by whatever already runs per frame, which is what makes an eight-second dusk a five-line unit test rather than a stopwatch and a headset.
 
 ## What it is not
 
@@ -115,6 +127,6 @@ for (const contractCase of sceneManagerContractCases()) {
 
 `threejs-`, `iwsdk-`, `xrblocks-environment` and `native-environment` all run all four suites - `xrblocks-environment`'s audio suite runs against what `createXRBlocksAudio` returns, since that adapter reuses `ThreeAudioPort` outright - so a case failing on yours is a real difference in behaviour, not a difference in test style.
 
-## Licence
+## License
 
-MIT. Part of the [Reality Collective](https://github.com/realitycollective) WebXR stack.
+MIT - see [LICENSE](./LICENSE).
