@@ -1,7 +1,7 @@
 {
   "name": "@realitycollective/iwsdk-environment",
   "version": "0.1.1-preview.4",
-  "description": "Meta IWSDK adapter for the Reality Collective WebXR Environment Extensions - drives IWSDK's own DomeGradient, light components, transform entities and AudioSource machinery from the engine-free @realitycollective/webxr-environment core, with a one-call registerEnvironment(world) setup and an ECS system that ticks the directors. Re-exports the core.",
+  "description": "Meta IWSDK adapter for the Reality Collective WebXR Environment Extensions - drives IWSDK's own DomeGradient, light components, transform entities, depth sensing, scene understanding, AudioSource machinery and SceneJSONImporter (scene management) from the engine-free @realitycollective/webxr-environment core, with a one-call registerEnvironment(world) setup and an ECS system that ticks the directors. Re-exports the core.",
   "keywords": [
     "realitycollective",
     "iwsdk",
@@ -12,7 +12,11 @@
     "fog",
     "lighting",
     "audio",
-    "typescript"
+    "typescript",
+    "scenes",
+    "scene-management",
+    "occlusion",
+    "world-sensing"
   ],
   "license": "MIT",
   "author": "Reality Collective",

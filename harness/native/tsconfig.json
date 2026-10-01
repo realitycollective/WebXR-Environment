@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": [],
+    "paths": {
+      "@realitycollective/webxr-environment": ["../../packages/webxr-environment/src/index.ts"],
+      "@realitycollective/native-environment": ["../../packages/native-environment/src/index.ts"]
+    }
+  },
+  "include": ["entry.ts", "src/**/*.ts", "scene-assets.ts"]
+}

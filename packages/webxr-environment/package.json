@@ -1,7 +1,7 @@
 {
   "name": "@realitycollective/webxr-environment",
   "version": "0.1.1-preview.4",
-  "description": "Engine-free core of the Reality Collective WebXR Environment Extensions: the world around the player (sky, fog, ambient and key light) and the sound in it (cue registry, bus mix, retrigger policy, voices), described as plain data, interpolated by a host-ticked director and applied through engine ports. Pair with an engine adapter: threejs-environment or iwsdk-environment.",
+  "description": "Engine-free core of the Reality Collective WebXR Environment Extensions: the world around the player (sky, fog, ambient and key light, image-based lighting), what the device senses of the real one (depth occlusion, light estimation, planes, meshes, anchors, hit tests), the sound in it (cue registry, bus mix, retrigger policy, spatial voices) and scene management (a scene list, single and additive loads, preload, persistent nodes, instances), described as plain data, interpolated by a host-ticked director and applied through engine ports. Pair with an engine adapter: threejs-environment, iwsdk-environment, xrblocks-environment or native-environment.",
   "keywords": [
     "realitycollective",
     "webxr",
@@ -11,7 +11,13 @@
     "fog",
     "lighting",
     "audio",
-    "typescript"
+    "typescript",
+    "scenes",
+    "scene-management",
+    "levels",
+    "occlusion",
+    "light-estimation",
+    "world-sensing"
   ],
   "license": "MIT",
   "author": "Reality Collective",

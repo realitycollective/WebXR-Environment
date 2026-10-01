@@ -41,6 +41,7 @@ It drives IWSDK's own machinery rather than reaching past it to three.js:
 - **Depth occlusion** - `DepthSensingSystem` for the system-level settings and `DepthOccludable` per entity. IWSDK opts entities in one at a time by patching their materials, so `scope: "all"` needs an `occludables` option naming which entities the real world may hide - the entities are content, and content is yours. Whatever the port adds it remembers, so turning occlusion off never strips a component you added yourself. Without that option it reports `unavailable` and says so.
 - **Light estimation** - none. IWSDK has no WebXR light estimation at all (checked in 0.5.3 and 1.0.0), and the port reports `unsupported` with that sentence rather than going quiet. Filed upstream as item 6.1. An `ibl: { kind: "estimated" }` asked for here is refused the same way, and the environment map you set yourself is left where it was.
 - **The room** - hits carry no distance here, because IWSDK moves a target entity to the hit and keeps the ray to itself; guessing from the head would be a different number wearing the same name. `IWSDKWorldSensingPort` queries the entities IWSDK's `SceneUnderstandingSystem` already created rather than reaching past it to the session, so planes, meshes and anchors come with IWSDK's own measurements. A hit test becomes an entity carrying `EnvironmentRaycastTarget`, which is how IWSDK casts; creating an anchor means creating an entity with `XRAnchor`, which is how IWSDK anchors.
+- **Scenes** - `createIWSDKScenes(world, options)` puts the core's `SceneManager` over `IWSDKScenePort`: scenes are built by IWSDK's own `SceneJSONImporter`, each under its own root entity, beside `world.loadLevel` rather than replacing it. Single, additive, preload, persistent nodes and instances follow the core's rules.
 - **Audio** - one entity per voice, carrying `AudioSource` with `playbackMode` pinned to `Overlap`, plus the cue's own reference distance, rolloff, maximum distance, `DistanceModel` and cone. IWSDK hands the entity transform to the same three.js positional audio the other adapter uses, so a `facing` turns the entity and the cone angles are written in degrees. The core has already applied the cue's retrigger policy, and letting IWSDK apply its own on top would make `restart` mean two different things on two engines.
 
 Every one of those is an IWSDK platform component with no app-side equivalent. The adapter creates **no geometry**: a floor would be a mesh, and meshes are the app's.
@@ -69,6 +70,6 @@ A session belongs to the platform layer, not to the environment. `setPassthrough
 
 `three >= 0.170.0`, which every IWSDK application already carries (IWSDK projects alias it to `super-three`). The adapter imports three.js classes from `three` directly rather than through `@iwsdk/core`'s star re-export, so it prebundles even when an application excludes `three` from Vite's dependency optimizer to transform its source.
 
-## Licence
+## License
 
-MIT.
+MIT - see [LICENSE](./LICENSE).

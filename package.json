@@ -22,7 +22,9 @@
     "build:playground": "npm run build && npm --workspace environment-playground run build",
     "build:demos": "npm run build:playground",
     "dev:playground": "npm run dev -w environment-playground",
-    "smoke": "node scripts/smoke-deploy.mjs"
+    "smoke": "node scripts/smoke-deploy.mjs",
+    "harness:scenes": "node harness/native/scripts/write-scenes.mjs",
+    "harness:compile": "tsc -p harness/native/tsconfig.json --noEmit && node harness/native/compile.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
@@ -30,6 +32,8 @@
     "@types/node": "^22.20.1",
     "@types/three": "0.185.4",
     "@vitest/coverage-v8": "^4.1.8",
+    "esbuild": "^0.28.2",
+    "hermes-compiler": "^250829098.0.19",
     "playwright-core": "^1.61.1",
     "publint": "^0.3.24",
     "three": "npm:super-three@0.185.0",

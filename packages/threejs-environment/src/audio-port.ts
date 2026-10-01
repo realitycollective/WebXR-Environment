@@ -44,6 +44,16 @@ export interface ThreeAudioPortOptions {
    * one).
    */
   readonly parent?: Object3D;
+  /**
+   * The viewer's head (the render camera). The core rule
+   * (`AUDIO_LISTENER_RULE`): the listener is the head, its position and
+   * orientation follow the head pose every frame. IWSDK's `AudioSystem`
+   * parents its listener to the camera itself; here the port does the same
+   * when given the head, moving the listener under it unless it already sits
+   * there. Omit only when the app has parented the listener to the camera
+   * itself.
+   */
+  readonly head?: Object3D;
   /** Injected for tests. Defaults to a shared `AudioLoader`. */
   readonly loader?: Pick<AudioLoader, "loadAsync">;
   /** Reference distance for positional voices, metres. Default 1. */
@@ -54,6 +64,14 @@ export interface ThreeAudioPortOptions {
    * `DEFAULT_AUDIO_START_TIMEOUT_MS` in `@realitycollective/webxr-environment`.
    */
   readonly startTimeoutMs?: number;
+}
+
+/** Whether `object` is `root` or one of its descendants. */
+function isUnder(object: Object3D, root: Object3D): boolean {
+  for (let at: Object3D | null = object; at; at = at.parent) {
+    if (at === root) return true;
+  }
+  return false;
 }
 
 /** Web Audio points a source along +Z, and three.js follows it. */
@@ -92,6 +110,7 @@ export class ThreeAudioPort implements AudioPort {
 
   constructor(listener: AudioListener, options: ThreeAudioPortOptions = {}) {
     this.#listener = listener;
+    if (options.head && !isUnder(listener, options.head)) options.head.add(listener);
     this.#parent = options.parent ?? listener.parent ?? listener;
     this.#loader = options.loader ?? new AudioLoader();
     this.#refDistance = options.refDistance ?? 1;
