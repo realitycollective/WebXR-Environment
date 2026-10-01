@@ -77,11 +77,10 @@ if (!args.includes("--no-hermes")) {
 
 console.log(JSON.stringify({ step: "compiled", bundle: outfile }));
 
+// hermes-compiler ships every platform's binary, so take this machine's, never the first that exists:
+// on a Linux runner the Windows .exe exists too, and the shell refuses it.
 function findHermesc() {
-  const candidates = [
-    resolve(root, "node_modules/hermes-compiler/hermesc/win64-bin/hermesc.exe"),
-    resolve(root, "node_modules/hermes-compiler/hermesc/linux64-bin/hermesc"),
-    resolve(root, "node_modules/hermes-compiler/hermesc/osx-bin/hermesc"),
-  ];
-  return candidates.find((p) => existsSync(p)) ?? null;
+  const sub = process.platform === "win32" ? "win64-bin/hermesc.exe" : process.platform === "darwin" ? "osx-bin/hermesc" : "linux64-bin/hermesc";
+  const hermesc = resolve(root, "node_modules/hermes-compiler/hermesc", sub);
+  return existsSync(hermesc) ? hermesc : null;
 }
