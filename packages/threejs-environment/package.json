@@ -1,6 +1,6 @@
 {
   "name": "@realitycollective/threejs-environment",
-  "version": "0.1.1-preview.4",
+  "version": "0.1.2-preview.0",
   "description": "three.js adapter for the Reality Collective WebXR Environment Extensions: an equirectangular gradient sky, linear and exponential fog, ambient and directional lighting, image-based lighting, depth occlusion and light estimation through three.js's own WebXR support, planes, meshes, anchors and hit tests from the XRFrame, Web Audio playback through AudioListener / PositionalAudio, and scene management (glTF scenes under one root) - all driven by the engine-free @realitycollective/webxr-environment core, which it re-exports.",
   "keywords": [
     "realitycollective",
@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@realitycollective/webxr-environment": "^0.1.1-preview.4"
+    "@realitycollective/webxr-environment": "^0.1.2-preview.0"
   },
   "peerDependencies": {
     "three": ">=0.170.0"
