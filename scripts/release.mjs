@@ -5,14 +5,20 @@
 //
 //   node scripts/release.mjs status
 //       What the working tree carries, whether the packages agree with each other,
-//       whether the next tag is free, and what the registry serves. Read-only.
+//       whether the next tag is free, what the registry serves, and whether every
+//       dependency on another Reality Collective repository could go into main.
+//       Read-only.
 //
 //   node scripts/release.mjs prepare [--version X.Y.Z]
 //       Runs the full gate on development as it stands, then cuts release/X.Y.Z,
-//       drops the preview suffix, regenerates the lockfile, dates the changelog,
-//       and STOPS and asks before it commits, pushes and opens the pull request.
+//       drops the preview suffix, moves every dependency on another Reality
+//       Collective repository to npm's latest release (rc-dependencies.mjs),
+//       regenerates the lockfile, dates the changelog, and STOPS and asks before
+//       it commits, pushes and opens the pull request.
 //       The gate runs first so a failing build or test costs nothing to undo:
-//       no branch has been cut and no file has been stamped.
+//       no branch has been cut and no file has been stamped. So does the
+//       dependency check: a dependency on an unreleased preview of another
+//       repository stops it, because that repository has to release first.
 //
 // Publishing is NOT here. Both the preview publish and the release publish are the
 // "Publish to npm" GitHub Action, dispatched once with dryRun ticked and once
@@ -37,6 +43,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { fixRepository, formatViolation, reportFor } from "./rc-dependencies.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = join(scriptDir, "..");
@@ -232,7 +239,7 @@ function stampChangelog(version, date) {
 
 // --- commands -----------------------------------------------------------------
 
-function cmdStatus() {
+async function cmdStatus() {
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   const version = manifest(config.core).version;
   const parsed = parseVersion(version);
@@ -269,6 +276,16 @@ function cmdStatus() {
       .join("  ");
     log(`  ${name.padEnd(46)} ${tags}`);
   }
+
+  step("Other Reality Collective repositories, as a release would need them");
+  const deps = await reportFor(root, "main");
+  for (const [name, target] of Object.entries(deps.targets)) {
+    log(`  ${name.padEnd(46)} latest=${target.version ?? `(${target.error})`}`);
+  }
+  // A preview of this repository's own packages is what a release stamps away, so it is not news here.
+  const outstanding = deps.violations.filter((v) => v.reason !== "internal-prerelease");
+  if (!outstanding.length) log("  every dependency names npm's latest release");
+  for (const v of outstanding) log(`  ${v.fixable ? "prepare moves:" : "BLOCKS:      "} ${formatViolation(v, deps)}`);
 }
 
 async function cmdPrepare() {
@@ -308,6 +325,19 @@ async function cmdPrepare() {
   // nothing rather than leaving a half-stamped branch behind.
   changelogHeading(version);
 
+  // On main a dependency on another Reality Collective repository names npm's latest release.
+  // One that is merely behind is moved after the stamp. One on an unreleased preview cannot be:
+  // that repository releases first, and finding out now costs nothing. This repository's own
+  // preview ranges are what the stamp removes, so they do not count here.
+  const deps = await reportFor(root, "main");
+  const blocking = deps.violations.filter((v) => !v.fixable && v.reason !== "internal-prerelease");
+  if (blocking.length) {
+    fail(
+      `a release cannot go into main while it depends on something npm has not released:\n` +
+        blocking.map((v) => `  ${formatViolation(v, deps)}`).join("\n"),
+    );
+  }
+
   log(`  development carries ${current}`);
   log(`  releasing            ${version}`);
   log(`  on branch            ${branch}`);
@@ -315,6 +345,9 @@ async function cmdPrepare() {
   // The gate runs before the branch is cut. Nothing it checks depends on the
   // stamp: set-version only rewrites version strings, and verify:pack names its
   // tarballs from them. Failing here leaves the tree exactly as it was found.
+  // The dependency move after the stamp changes nothing on a development that
+  // passes its own CI: there every sibling already names the newest version on
+  // npm, and the check above has stopped if that is an unreleased preview.
   if (skipGate) {
     step("Gate skipped (--no-gate)");
   } else {
@@ -329,6 +362,17 @@ async function cmdPrepare() {
   gitLive("checkout", "-b", branch);
   exec("node", [join("scripts", "set-version.mjs"), "--set", version]);
   exec("npm", ["install", "--package-lock-only"]);
+
+  step("Moving dependencies on other Reality Collective repositories to npm's latest release");
+  const moved = await fixRepository(root, "main");
+  for (const file of moved.changed) log(`  moved: ${file}`);
+  if (moved.report.violations.length) {
+    fail(
+      `after the stamp, these still do not name npm's latest release:\n` +
+        moved.report.violations.map((v) => `  ${formatViolation(v, moved.report)}`).join("\n") +
+        `\n  To abandon this release: git checkout development && git checkout . && git branch -D ${branch}`,
+    );
+  }
 
   step("Dating the changelog");
   stampChangelog(version, new Date().toISOString().slice(0, 10));
@@ -364,7 +408,7 @@ async function cmdPrepare() {
     "CHANGELOG.md",
     "package-lock.json",
     "README.md",
-    ...config.packages.map((dir) => `packages/${dir}/package.json`),
+    ...new Set([...config.packages.map((dir) => `packages/${dir}/package.json`), ...moved.changed]),
   );
   if (gitTry("diff", "--cached", "--quiet").ok) fail("nothing was staged. The stamp changed no files.");
   gitLive("commit", "-m", `chore(release): ${version}`);
@@ -375,6 +419,9 @@ async function cmdPrepare() {
     "",
     `- every package stamped \`${version}\` by \`scripts/set-version.mjs\`, internal ranges moved with it`,
     "- `package-lock.json` regenerated against the stamped versions",
+    moved.changed.some((file) => file !== "package-lock.json")
+      ? "- dependencies on other Reality Collective repositories moved to npm's latest release by `scripts/rc-dependencies.mjs`"
+      : "- every dependency on another Reality Collective repository already named npm's latest release",
     `- \`CHANGELOG.md\` heading dated and its link pointed at \`${tag}\``,
     "",
     "Merging this deploys production where the repository has a Cloudflare project.",
@@ -401,7 +448,7 @@ async function cmdPrepare() {
   log("  Afterwards, collect the re-seed commit: git checkout development && git pull");
 }
 
-const commands = { status: async () => cmdStatus(), prepare: cmdPrepare };
+const commands = { status: cmdStatus, prepare: cmdPrepare };
 
 if (!commands[command]) {
   fail(`unknown command '${command}'. Expected one of: ${Object.keys(commands).join(", ")}.`);

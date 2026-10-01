@@ -161,6 +161,14 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Publishing $VERSION from '$BRANCH' under dist-tag '$TAG'"
 
+      # Reads only the manifests, the lockfile and npm, so it runs before the install. From main
+      # every dependency on another Reality Collective repository names npm's latest release;
+      # from development, the newest version on npm (scripts/rc-dependencies.mjs).
+      - name: Check Reality Collective dependencies
+        env:
+          INTO: ${{ github.ref_name }}
+        run: node scripts/rc-dependencies.mjs --into "$INTO"
+
       - name: Install dependencies
         run: npm ci
 
