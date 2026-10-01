@@ -5,9 +5,17 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# The native harness compile and the conversion pipeline write here (bundles, Hermes bytecode, APKs)
+harness/native/build/
+
 # Test output
 coverage/
 *.lcov
+
+# Local run output - never commit: agent scratch files, logs and recorded input traces
+.scratch/
+/traces/
+*.log
 
 # Output of `npm pack`
 *.tgz

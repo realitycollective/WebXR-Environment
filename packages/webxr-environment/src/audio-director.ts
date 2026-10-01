@@ -37,6 +37,7 @@ import type {
   AudioVoiceRequest,
   PlayOptions,
 } from "./audio.js";
+import { resolveAudioSpatial } from "./audio.js";
 import { DEFAULT_BUS } from "./audio.js";
 import type { AudioPort } from "./ports.js";
 
@@ -236,7 +237,7 @@ export class AudioDirector {
       gain,
       loop,
       at: options.at ?? null,
-      spatial: cue.spatial ?? null,
+      spatial: options.at !== undefined || cue.positional === true ? resolveAudioSpatial(cue.spatial) : null,
       facing: options.facing ?? null,
       ended: () => {
         this.#voices.delete(id);

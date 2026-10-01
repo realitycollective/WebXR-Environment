@@ -19,9 +19,22 @@
  * entry is a gesture. Call `resume()` from the same handler that enters the
  * session (or from the Enter-VR button) - nothing here can do it for you, and
  * a suspended context makes every voice silently succeed.
+ *
+ * ---------------------------------------------------------------------------
+ * A HOLD THAT NEVER LANDS
+ * ---------------------------------------------------------------------------
+ * A held play resolves when the loader resolves, and a `fetch` that hangs -
+ * a dead network, a server that never answers - never does either. That is
+ * "never starts" in exactly the sense `AudioStartReaper` exists for (see its
+ * file comment), so `start()` tracks every voice with one and `#begin()`
+ * (called the instant `play()` is actually invoked, cached buffer or not)
+ * confirms it. Only a voice still held when the timeout elapses is ever
+ * reaped this way - once `#begin()` has run, the sound plays for however long
+ * it plays, exactly as `onended` reports it.
  */
 import { Audio, AudioListener, AudioLoader, Object3D, PositionalAudio, Vector3 } from "three";
 import type { AudioCue, AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
+import { AudioStartReaper, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 
 export interface ThreeAudioPortOptions {
   /**
@@ -31,10 +44,34 @@ export interface ThreeAudioPortOptions {
    * one).
    */
   readonly parent?: Object3D;
+  /**
+   * The viewer's head (the render camera). The core rule
+   * (`AUDIO_LISTENER_RULE`): the listener is the head, its position and
+   * orientation follow the head pose every frame. IWSDK's `AudioSystem`
+   * parents its listener to the camera itself; here the port does the same
+   * when given the head, moving the listener under it unless it already sits
+   * there. Omit only when the app has parented the listener to the camera
+   * itself.
+   */
+  readonly head?: Object3D;
   /** Injected for tests. Defaults to a shared `AudioLoader`. */
   readonly loader?: Pick<AudioLoader, "loadAsync">;
   /** Reference distance for positional voices, metres. Default 1. */
   readonly refDistance?: number;
+  /**
+   * How long to wait for a held play's buffer before giving up on it,
+   * milliseconds. Default 10 000 - see `AudioStartReaper` /
+   * `DEFAULT_AUDIO_START_TIMEOUT_MS` in `@realitycollective/webxr-environment`.
+   */
+  readonly startTimeoutMs?: number;
+}
+
+/** Whether `object` is `root` or one of its descendants. */
+function isUnder(object: Object3D, root: Object3D): boolean {
+  for (let at: Object3D | null = object; at; at = at.parent) {
+    if (at === root) return true;
+  }
+  return false;
 }
 
 /** Web Audio points a source along +Z, and three.js follows it. */
@@ -62,6 +99,7 @@ export class ThreeAudioPort implements AudioPort {
   readonly #parent: Object3D;
   readonly #loader: Pick<AudioLoader, "loadAsync">;
   readonly #refDistance: number;
+  readonly #reaper: AudioStartReaper;
   readonly #buffers = new Map<string, AudioBuffer>();
   readonly #loading = new Map<string, Promise<AudioBuffer | null>>();
   readonly #voices = new Map<number, ActiveVoice>();
@@ -72,9 +110,13 @@ export class ThreeAudioPort implements AudioPort {
 
   constructor(listener: AudioListener, options: ThreeAudioPortOptions = {}) {
     this.#listener = listener;
+    if (options.head && !isUnder(listener, options.head)) options.head.add(listener);
     this.#parent = options.parent ?? listener.parent ?? listener;
     this.#loader = options.loader ?? new AudioLoader();
     this.#refDistance = options.refDistance ?? 1;
+    this.#reaper = new AudioStartReaper(
+      options.startTimeoutMs === undefined ? {} : { startTimeoutMs: options.startTimeoutMs },
+    );
   }
 
   /**
@@ -97,6 +139,7 @@ export class ThreeAudioPort implements AudioPort {
       request.ended();
       return;
     }
+    this.#reaper.track(request.voiceId, request, () => this.#onStartTimeout(request));
     const buffer = this.#buffers.get(request.cue.id);
     if (buffer !== undefined) {
       this.#begin(request, buffer);
@@ -108,6 +151,7 @@ export class ThreeAudioPort implements AudioPort {
       // starts. This is also the disposal path.
       if (!this.#waiting.delete(request.voiceId) || this.#disposed) return;
       if (loaded === null) {
+        this.#reaper.release(request.voiceId);
         request.ended();
         return;
       }
@@ -116,6 +160,7 @@ export class ThreeAudioPort implements AudioPort {
   }
 
   stop(voiceId: number): void {
+    this.#reaper.release(voiceId);
     if (this.#waiting.delete(voiceId)) return;
     const voice = this.#voices.get(voiceId);
     if (voice === undefined) return;
@@ -127,9 +172,15 @@ export class ThreeAudioPort implements AudioPort {
     this.#voices.get(voiceId)?.audio.setVolume(gain);
   }
 
+  /** Drives the start-timeout reaper for a voice still held on a buffer that never arrives. */
+  update(deltaMs: number): void {
+    this.#reaper.update(deltaMs);
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#reaper.clear();
     this.#waiting.clear();
     for (const [id, voice] of this.#voices) {
       this.#voices.delete(id);
@@ -137,6 +188,13 @@ export class ThreeAudioPort implements AudioPort {
     }
     this.#buffers.clear();
     this.#loading.clear();
+  }
+
+  /** The shared reaper gave up on a held voice whose buffer never arrived; see its file comment for the rule. */
+  #onStartTimeout(request: AudioVoiceRequest): void {
+    if (!this.#waiting.delete(request.voiceId)) return;
+    console.warn(`[threejs-environment] cue "${request.cue.id}" never started (${request.cue.src})`);
+    request.ended();
   }
 
   #ensureLoaded(cue: AudioCue): Promise<AudioBuffer | null> {
@@ -165,6 +223,10 @@ export class ThreeAudioPort implements AudioPort {
   }
 
   #begin(request: AudioVoiceRequest, buffer: AudioBuffer): void {
+    // From here on the voice really is starting, cached buffer or a held one
+    // that just landed - the reaper's job is done regardless of how long the
+    // sound then plays for.
+    this.#reaper.confirmStarted(request.voiceId);
     const positional = request.at !== null || (request.cue.positional ?? false);
     let holder: Object3D | null = null;
     let audio: VoiceAudio;
@@ -175,20 +237,20 @@ export class ThreeAudioPort implements AudioPort {
       // The port's own reference distance is the FLOOR, not the law: a cue
       // that describes how far it carries beats one number applied to every
       // sound in the title, which is what this adapter used to do.
-      const attenuation = request.spatial;
-      spatial.setRefDistance(attenuation?.refDistance ?? this.#refDistance);
-      if (attenuation?.rolloffFactor !== undefined) {
-        spatial.setRolloffFactor(attenuation.rolloffFactor);
-      }
-      if (attenuation?.maxDistance !== undefined) spatial.setMaxDistance(attenuation.maxDistance);
-      if (attenuation?.model !== undefined) spatial.setDistanceModel(attenuation.model);
+      // Every field arrives resolved from the core defaults (the director's
+      // `resolveAudioSpatial`), so the same cue attenuates the same on every
+      // platform; the port's own `refDistance` option stands in only for a
+      // request built by hand with no attenuation at all.
+      const attenuation = request.spatial ?? resolveAudioSpatial({ refDistance: this.#refDistance });
+      spatial.setRefDistance(attenuation.refDistance);
+      spatial.setRolloffFactor(attenuation.rolloffFactor);
+      spatial.setMaxDistance(attenuation.maxDistance);
+      spatial.setDistanceModel(attenuation.model);
       // Radians in the contract, degrees at the panner. three.js orients a
       // positional sound along its own +Z, so the holder is turned to point
       // that axis the way the app said the sound travels.
-      const cone = attenuation?.cone;
-      if (cone !== undefined) {
-        spatial.setDirectionalCone(toDegrees(cone.inner), toDegrees(cone.outer), cone.outsideGain);
-      }
+      const cone = attenuation.cone;
+      spatial.setDirectionalCone(toDegrees(cone.inner), toDegrees(cone.outer), cone.outsideGain);
       // `?? null` rather than a bare null check: a request built by hand - a
       // test, or an app driving the port directly - carries `undefined` here,
       // and a NaN quaternion is a silent way to lose a sound.

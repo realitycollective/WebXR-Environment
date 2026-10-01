@@ -1,13 +1,19 @@
 # WebXR Environment
 
-WebXR Environment describes the world **around** the player - the sky, the fog, the light - and the **sound** in it, as plain data, and applies that description through a thin adapter for whichever engine is hosting.
+| Branch | Build | Publish | Published on npm |
+| --- | --- | --- | --- |
+| `main` | [![main build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/ci.yml?branch=main&label=build)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/ci.yml?query=branch%3Amain) | [![main publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/publish-npm.yml?branch=main&label=publish)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/publish-npm.yml?query=branch%3Amain) | [![npm latest](https://img.shields.io/npm/v/@realitycollective/webxr-environment/latest?label=npm%20latest)](https://www.npmjs.com/package/@realitycollective/webxr-environment?activeTab=versions) |
+| `development` | [![development build](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/ci.yml?branch=development&label=build)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/ci.yml?query=branch%3Adevelopment) | [![development publish](https://img.shields.io/github/actions/workflow/status/realitycollective/WebXR-Environment/publish-npm.yml?branch=development&label=publish)](https://github.com/realitycollective/WebXR-Environment/actions/workflows/publish-npm.yml?query=branch%3Adevelopment) | [![npm preview](https://img.shields.io/npm/v/@realitycollective/webxr-environment/preview?label=npm%20preview)](https://www.npmjs.com/package/@realitycollective/webxr-environment?activeTab=versions) |
 
-Every one of those is a **platform facility** that each host exposes differently: 
+WebXR Environment describes the world **around** the player - the sky, the fog, the light - and the **sound** in it, as plain data, and applies that description through an adapter for whichever engine is hosting.
 
-- Three.js has `scene.background` and `Fog`
-- IWSDK has `DomeGradient` and `AmbientLightComponent`
+Every one of those is a **platform facility** that each host exposes differently:
 
-additional hosts will have something else again. Simplifying the use of those, whichever headset and shim the title happens to be running on, is the entire job.
+- three.js has `scene.background` and `Fog`.
+- IWSDK has `DomeGradient` and `AmbientLightComponent`.
+- Each further host has something else again.
+
+Simplifying the use of those, whichever headset and shim the title happens to be running on, is the entire job.
 
 > [!NOTE]
 > **Content is never here.**
@@ -26,13 +32,18 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 
 | Package | What it is |
 | --- | --- |
-| `@realitycollective/webxr-environment` | The core. Environment and audio logic, with no 3D engine code and **no dependencies at all**. |
+| `@realitycollective/webxr-environment` | The core. Environment, sensing, audio and scene-management logic, with no 3D engine code and **no dependencies at all**. |
 | `@realitycollective/threejs-environment` | Adapter for plain three.js and raw WebXR. No other framework needed. |
 | `@realitycollective/iwsdk-environment` | Adapter for Meta's Immersive Web SDK, driving IWSDK's own environment, lighting and audio machinery. |
 | `@realitycollective/xrblocks-environment` | EXPERIMENTAL adapter for Google XR Blocks. Builds on the three.js adapter and adds XR Blocks' depth occlusion and light estimation. |
+| `@realitycollective/native-environment` | Adapter for a native app (OpenXR, visionOS) that embeds a JavaScript engine and owns rendering and audio itself. Forwards to `globalThis.__rcHost`'s `environment`, `audio`, `sensing` and `scenes` slices as plain data - no asset decoding here. |
 
 > [!NOTE]
-> Pending is a BabylonJS shim to mirror the capabilities of the Service Framework. It waits on a review across all five families rather than being started here.
+> A Babylon.js adapter, to match the Babylon.js bindings in the Service Framework and Interactions families, is pending. It waits on a review across all five families rather than being started here.
+
+### Native, tested on a headset
+
+A native app built with the native package has been tested on a headset and checked by its conformance kit. There are no known issues.
 
 ### What the core gives you
 
@@ -47,29 +58,31 @@ Install exactly one adapter. Each one re-exports the core, so you never install 
 - **Passthrough that knows which kind it is** - `setPassthrough` takes the WebXR blend mode as well as a boolean, because `additive` displays ADD what you draw to the real world (black is invisible) while `alpha-blend` composites normally. An app can suppress different slots per mode instead of picking one compromise for both.
 - **Audio that carries its own distance** - a cue says how far it falls off (reference distance, rolloff, maximum distance, curve) rather than every sound in the title sharing one number set by the adapter.
 - **The room, as a separate component** - `WorldSensingDirector` sits beside the environment one and answers a different question: what is actually here. Planes, meshes, anchors and hit tests arrive as plain data with the host's own semantic labels, and the director diffs them so an app is told what appeared, moved and went away rather than re-reading a list every frame. It reports geometry and creates none.
+- **Scene management** - `SceneManager` keeps a scene list, single and additive loads, a stack any scene can leave, preloading for an instant switch, an active scene whose `environment` drives the director, persistent nodes and lifecycle events. Each adapter builds and destroys the content with its host's own loaders, and `sceneManagerContractCases()` holds all four to the same rules.
 - **No loop of its own** - `update(deltaMs)` is called by whatever already runs per frame. That is what makes an eight-second dusk a five-line unit test instead of a stopwatch and a headset, and it is why an XR host that only ticks while focused gets the pausing behaviour it expects for free.
 
 ### What each adapter adds
 
 - **three.js** - a gradient sky as a two-pixel-wide equirectangular `DataTexture`, generated by a pure function (no shader, no canvas, headlessly testable) and regenerated in place across a transition rather than reallocated every frame. `Fog` / `FogExp2` mutated while the kind holds, and an `AmbientLight` and a `DirectionalLight` positioned from the direction light travels. Audio over `Audio` / `PositionalAudio`, where a play arriving before its buffer has decoded is **held** rather than dropped - which is why the first press of a session is not silent.
-- **Meta IWSDK** - IWSDK's own `DomeGradient` and `DomeTexture` on the level root (so IWSDK's environment system still hides the background for passthrough), `IBLGradient` / `IBLTexture` for the environment map (`kind: "room"` is native here), its light components on transform entities, and `AudioSource` with one entity per voice so the core's retrigger policy is the one that applies. Depth occlusion drives `DepthSensingSystem` and the per-entity `DepthOccludable`; because IWSDK opts entities in one at a time, the app says which entities those are and the adapter never removes a component it did not add. IWSDK 0.5.3 has no light estimation, and the adapter says so rather than going quiet. Fog is the exception, set on `world.scene`, because IWSDK has no fog component. Setup is one call: `registerEnvironment(world)`.
+- **Meta IWSDK** - IWSDK's own `DomeGradient` and `DomeTexture` on the level root (so IWSDK's environment system still hides the background for passthrough), `IBLGradient` / `IBLTexture` for the environment map (`kind: "room"` is native here), its light components on transform entities, and `AudioSource` with one entity per voice so the core's retrigger policy is the one that applies. Depth occlusion drives `DepthSensingSystem` and the per-entity `DepthOccludable`; because IWSDK opts entities in one at a time, the app says which entities those are and the adapter never removes a component it did not add. IWSDK 1.0 has no light estimation, and the adapter says so rather than going quiet. Fog is the exception, set on `world.scene`, because IWSDK has no fog component. Setup is one call: `registerEnvironment(world)`.
 - **Google XR Blocks** - the three.js adapter plus two sensors. Occlusion registers as a client of XR Blocks' `Depth` manager and chooses its blur; light estimation reads the `Lighting` manager, which already owns the WebXR half. Both are configured during XR Blocks' own init, so anything this adapter arrived too late to change is named in the report rather than silently dropped - including the warning that XR Blocks may be lighting the scene itself, which would light the room twice.
+- **Native (OpenXR, visionOS)** - forwards every slot to `globalThis.__rcHost.environment` / `.audio` / `.sensing` / `.scenes` as plain data and decides nothing: occlusion, light estimation and world sensing are grown on the port only when the host implements them, so `unsupported` is reported by the same mechanism every other adapter uses, one layer up. A `src` string is resolved and decoded entirely by the native app; nothing here fetches a byte.
 
 No adapter creates geometry.
 
 ### Which adapter has which sensor
 
-| | three.js | Meta IWSDK | Google XR Blocks |
-| --- | --- | --- | --- |
-| Sky, fog, ambient, key | yes | yes | yes |
-| Image-based lighting | yes (`room` is a neutral ramp without a prefilter) | yes (`room` is native) | yes |
-| Depth occlusion | yes, three.js's own, gpu-optimized depth only | yes, per entity | yes, XR Blocks' occlusion pass |
-| Light estimation | yes, straight from WebXR | no - reported, and requested upstream | yes, via XR Blocks' `Lighting` |
-| Spatial attenuation per cue | yes | yes | yes (three.js audio) |
-| Planes and meshes | yes, from the `XRFrame` | yes, from scene understanding | yes, from its own detectors |
-| Anchors | yes | yes | no - XR Blocks exposes none to read |
-| Hit test | yes, cast from the viewer or from either hand's own ray, with a distance | yes, via `EnvironmentRaycastTarget`; no distance, because IWSDK keeps the ray | no - it places objects rather than reporting |
-| Measured reflections | yes, given a `reflection` hook to reach the cube map | no - reported | no - reported |
+| | three.js | Meta IWSDK | Google XR Blocks | Native |
+| --- | --- | --- | --- | --- |
+| Sky, fog, ambient, key | yes | yes | yes | yes |
+| Image-based lighting | yes (`room` is a neutral ramp without a prefilter) | yes (`room` is native) | yes | yes, entirely the host's |
+| Depth occlusion | yes, three.js's own, gpu-optimized depth only | yes, per entity | yes, XR Blocks' occlusion pass | depends on the host: reported when it has no `applyOcclusion` |
+| Light estimation | yes, straight from WebXR | no - reported, and requested upstream | yes, via XR Blocks' `Lighting` | depends on the host: reported when it has no `applyLightEstimation` |
+| Spatial attenuation per cue | yes | yes | yes (three.js audio) | yes, passed through as data |
+| Planes and meshes | yes, from the `XRFrame` | yes, from scene understanding | yes, from its own detectors | depends on the host's `sensing` slice |
+| Anchors | yes | yes | no - XR Blocks exposes none to read | depends on the host's `sensing` slice |
+| Hit test | yes, cast from the viewer or from either hand's own ray, with a distance | yes, via `EnvironmentRaycastTarget`; no distance, because IWSDK keeps the ray | no - it places objects rather than reporting | depends on the host's `sensing` slice |
+| Measured reflections | yes, given a `reflection` hook to reach the cube map | no - reported | no - reported | depends on the host |
 
 ### Asking what a host can do
 
@@ -114,7 +127,7 @@ Open it on a headset - each production deploy prints the URL and a QR code to th
 | Command | What |
 | --- | --- |
 | `npm ci` | set up the workspace |
-| `npm test` | vitest - architecture gates, director logic and both adapters, with coverage gates |
+| `npm test` | vitest - architecture gates, director logic and every adapter, with coverage gates |
 | `npm run typecheck` | strict typecheck, all packages + the playground |
 | `npm run build` | `tsc` → `dist/` per package |
 | `npm run verify:pack` | pack, install into a clean project and import - the consumer path |
@@ -127,8 +140,8 @@ The repository root **is** the npm workspace root - `packages/*` are the publish
 
 ## Layering rule
 
-```
-app → ONE adapter (threejs | iwsdk | xrblocks) → core (webxr-environment) → nothing
+```text
+app → ONE adapter (threejs | iwsdk | xrblocks | native) → core (webxr-environment) → nothing
 ```
 
 The XR Blocks adapter is the one exception to "one arrow": it builds on the three.js adapter, because XR Blocks renders through three.js and reimplementing four slots would only let them drift. Adapters inside ONE repository may compose like that; between families nothing references anything, which is the rule that matters.
@@ -137,7 +150,7 @@ Arrows only point down, and the core's arrow points at nothing at all. Its archi
 
 ## Where the boundary is
 
-The stack already has three families, and this one is drawn so as not to overlap any of them:
+The stack already has four other families, and this one is drawn so as not to overlap any of them:
 
 | Family | Owns |
 | --- | --- |
@@ -173,8 +186,8 @@ Two workflows ship in every Reality Collective TypeScript repository, with the s
 
 | Workflow | Trigger | Does |
 | --- | --- | --- |
-| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-environment-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate |
-| `publish-npm.yml` | manual dispatch | packs all three packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
+| `ci.yml` | every PR + push to `main` / `development` | Build, typecheck, test with coverage gates, `verify:pack`, playground build. On a PR it then deploys to `webxr-environment-test`; on a push to `main`, to production. The deploy steps skip when the Cloudflare secrets are absent, leaving a pure build gate. After a merged PR passes, it queues a publish dry run on the branch the PR merged into |
+| `publish-npm.yml` | manual dispatch, plus the dry run CI queues after a merged PR | packs all five packages and publishes to **npmjs.com** with provenance - `preview` dist-tag from `development`, `latest` from `main`. **Defaults to a dry run** |
 
 ## Releasing
 
@@ -185,18 +198,18 @@ Work branches off `main`; PRs target `main`. Releases are cut by dispatching the
 | `development` | `preview` | bumps the preview counter and pushes it back |
 | `main` | `latest` | tags, cuts the GitHub release, re-seeds `development` at the next patch preview |
 
-Unlike the sibling repositories, nothing here depends on `@realitycollective/webxr-input`, so there is no cross-repository publish order to observe.
+Unlike the Interactions and UI Extensions repositories, nothing here depends on `@realitycollective/webxr-input`, so there is no cross-repository publish order to observe.
 
 ## What this stack is and is not
 
-The Reality Collective WebXR packages aim at one outcome: an app's logic, input handling, interactions and UI should not care which engine hosts them. Each family ships an engine-free core and thin adapters for Meta IWSDK, plain three.js and WebXR, and where the family has one, Babylon.js and Google XR Blocks. When an app still has to reach into the host, either a contract is missing, which is a bug to report, or the app is overreaching.
+The Reality Collective WebXR packages aim at one outcome: an app's logic, input handling, interactions and UI should not care which engine hosts them. Each family ships an engine-free core and an adapter for each platform it serves. The platforms are Meta IWSDK (the reference), plain three.js and WebXR, Google XR Blocks, native XR apps (OpenXR, visionOS) that embed a JavaScript engine, and Babylon.js where the family has a binding. When an app still has to reach into the host, either a contract is missing, which is a bug to report, or the app is overreaching.
 
 Portable world-building is not a current promise. Scene content (meshes, prefabs, placement) is built by the app, ideally behind a factory interface the app owns, so that a second host can implement the same factories. A shared content descriptor, following the shape of the UI family's `SceneDescriptor`, will be considered only when a second host is actually targeted. Meta's `iwsdk.scene.v1` format is an acceptable authoring interchange in the meantime.
 
-That applies here with no exception. This family describes the sky, the fog and the light, which every host exposes and exposes differently. It creates no geometry, and the presets it ships are examples to copy rather than art direction.
+That applies here too. This family describes the sky, the fog and the light, which every host exposes and exposes differently. It creates no geometry, and the presets it ships are examples to copy rather than art direction. Since 2026-09-25 it also manages scenes (`SceneManager`): it loads, stacks, shows and unloads scenes the app authored, through each host's own loaders, and never reads what is in them. See `docs/BOUNDARY.md`.
 
-Position recorded on 2026-09-03 from the Pale Signal client's gaps report.
+Position recorded on 2026-09-03 from the Pale Signal client's gaps report, updated 2026-09-25.
 
-## Licence
+## License
 
-MIT.
+MIT - see [LICENSE](./LICENSE).

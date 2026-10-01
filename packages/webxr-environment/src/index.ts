@@ -38,7 +38,7 @@ export type {
   CuePolicy,
   PlayOptions,
 } from "./audio.js";
-export { DEFAULT_BUS, DEFAULT_BUSES } from "./audio.js";
+export { AUDIO_ATTENUATION_DEFAULTS, AUDIO_LISTENER_RULE, DEFAULT_BUS, DEFAULT_BUSES, distanceGain, resolveAudioSpatial } from "./audio.js";
 
 export type { AudioPort, EnvironmentPort } from "./ports.js";
 
@@ -99,8 +99,36 @@ export type {
 } from "./environment-director.js";
 export { EnvironmentDirector } from "./environment-director.js";
 
+export type {
+  InstantiateOptions,
+  LoadedScene,
+  LoadedSceneState,
+  SceneDefinition,
+  SceneLoadMode,
+  SceneLoadOptions,
+  ScenePort,
+} from "./scenes.js";
+export { PERSISTENT_SCENE_ID } from "./scenes.js";
+
+export type { SceneManagerOptions, SceneNodeBinder } from "./scene-manager.js";
+export { SceneManager } from "./scene-manager.js";
+
+export type {
+  SceneContractFixtures,
+  SceneContractHost,
+  SceneContractInspector,
+  SceneContractNode,
+  SceneContractScene,
+  SceneManagerContractCase,
+  SceneManagerContractSubject,
+} from "./scene-contract-cases.js";
+export { SCENE_CONTRACT_FIXTURES, sceneManagerContractCases } from "./scene-contract-cases.js";
+
 export type { AudioDirectorOptions } from "./audio-director.js";
 export { AudioDirector } from "./audio-director.js";
+
+export type { AudioStartReaperOptions, AudioStartReaperRequest } from "./audio-start-reaper.js";
+export { AudioStartReaper, DEFAULT_AUDIO_START_TIMEOUT_MS } from "./audio-start-reaper.js";
 
 export type { EasingFunction, EasingName } from "./math.js";
 export {
@@ -127,3 +155,18 @@ export {
   STOCK_PRESETS,
   VOID,
 } from "./presets.js";
+
+export type {
+  AudioPortContractCase,
+  AudioPortContractDriver,
+  AudioPortContractSubject,
+  EnvironmentPortContractCase,
+  EnvironmentPortContractSubject,
+  WorldSensingPortContractCase,
+  WorldSensingPortContractSubject,
+} from "./contract-cases.js";
+export {
+  audioPortContractCases,
+  environmentPortContractCases,
+  worldSensingPortContractCases,
+} from "./contract-cases.js";

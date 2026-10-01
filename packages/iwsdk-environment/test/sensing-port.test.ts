@@ -294,7 +294,7 @@ describe("light estimation", () => {
     expect(reports.at(-1)).toEqual({
       feature: "lightEstimation",
       state: "unsupported",
-      detail: "IWSDK 0.5.3 does not expose WebXR light estimation",
+      detail: "IWSDK 1.0 does not expose WebXR light estimation",
     });
 
     port.applyLightEstimation(null);

@@ -19,7 +19,12 @@
  * So this port polls in `update()` - which the director already calls - and
  * reports the end once a voice has been observed playing and then is not.
  * A voice that never starts at all (a missing file, a decode failure) would
- * otherwise be tracked forever, so it is reaped after `startTimeoutMs`.
+ * otherwise be tracked forever, so it is reaped after `startTimeoutMs` - by
+ * the shared `AudioStartReaper` every `AudioPort` in this family now composes
+ * (see its file comment), not by bookkeeping local to this file. This port's
+ * own contribution is calling `confirmStarted` the instant `AudioUtils.isPlaying`
+ * first reports true, exactly the signal `AudioStartReaper` needs and exactly
+ * what this file always polled for anyway - only the giving-up is shared now.
  */
 import {
   AudioSource,
@@ -32,6 +37,7 @@ import {
 } from "@iwsdk/core";
 import { Quaternion, Vector3 } from "three";
 import type { AudioPort, AudioVoiceRequest } from "@realitycollective/webxr-environment";
+import { AudioStartReaper, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 
 export interface IWSDKAudioPortOptions {
   /** Parent for the voice entities. Defaults to the world's default parent. */
@@ -39,7 +45,9 @@ export interface IWSDKAudioPortOptions {
   /**
    * How long to wait for a voice to start before giving up on it,
    * milliseconds. Default 10 000 - generous, because a cold asset fetch on a
-   * headset over hotel wifi is slower than anyone's patience.
+   * headset over hotel wifi is slower than anyone's patience. See
+   * `AudioStartReaper` / `DEFAULT_AUDIO_START_TIMEOUT_MS` in
+   * `@realitycollective/webxr-environment`, which every platform now shares.
    */
   readonly startTimeoutMs?: number;
 }
@@ -48,13 +56,12 @@ interface Voice {
   readonly entity: Entity;
   readonly request: AudioVoiceRequest;
   started: boolean;
-  waitedMs: number;
 }
 
 export class IWSDKAudioPort implements AudioPort {
   readonly #world: World;
   readonly #parent: Entity | undefined;
-  readonly #startTimeoutMs: number;
+  readonly #reaper: AudioStartReaper;
   readonly #voices = new Map<number, Voice>();
 
   #disposed = false;
@@ -62,7 +69,9 @@ export class IWSDKAudioPort implements AudioPort {
   constructor(world: World, options: IWSDKAudioPortOptions = {}) {
     this.#world = world;
     this.#parent = options.parent;
-    this.#startTimeoutMs = options.startTimeoutMs ?? 10_000;
+    this.#reaper = new AudioStartReaper(
+      options.startTimeoutMs === undefined ? {} : { startTimeoutMs: options.startTimeoutMs },
+    );
   }
 
   start(request: AudioVoiceRequest): void {
@@ -96,7 +105,10 @@ export class IWSDKAudioPort implements AudioPort {
         view[3] = TEMP_ROTATION.w;
       }
     }
-    const attenuation = request.spatial;
+    // Every field arrives resolved from the core defaults (the director's
+    // `resolveAudioSpatial`), Web Audio's own, so this port writes them all:
+    // the same cue attenuates the same on every platform.
+    const attenuation = positional ? (request.spatial ?? resolveAudioSpatial(null)) : null;
     entity.addComponent(AudioSource, {
       src: request.cue.src,
       volume: request.gain,
@@ -105,27 +117,22 @@ export class IWSDKAudioPort implements AudioPort {
       autoplay: false,
       // The core already applied the cue's policy before we got here.
       playbackMode: PlaybackMode.Overlap,
-      // Anything the cue did not describe is left to IWSDK's own defaults,
-      // which is why these are spread in rather than defaulted here: this port
-      // has no opinion about how far a sound carries, and inventing one would
-      // make the same cue sound different on each engine.
-      ...(attenuation?.refDistance === undefined ? {} : { refDistance: attenuation.refDistance }),
-      ...(attenuation?.rolloffFactor === undefined
-        ? {}
-        : { rolloffFactor: attenuation.rolloffFactor }),
-      ...(attenuation?.maxDistance === undefined ? {} : { maxDistance: attenuation.maxDistance }),
-      ...(attenuation?.model === undefined ? {} : { distanceModel: distanceModel(attenuation.model) }),
-      // Radians in the contract, degrees on the component - IWSDK passes these
-      // straight to the same Web Audio panner three.js uses.
-      ...(attenuation?.cone === undefined
+      ...(attenuation === null
         ? {}
         : {
+            refDistance: attenuation.refDistance,
+            rolloffFactor: attenuation.rolloffFactor,
+            maxDistance: attenuation.maxDistance,
+            distanceModel: distanceModel(attenuation.model),
+            // Radians in the contract, degrees on the component - IWSDK passes
+            // these straight to the same Web Audio panner three.js uses.
             coneInnerAngle: toDegrees(attenuation.cone.inner),
             coneOuterAngle: toDegrees(attenuation.cone.outer),
             coneOuterGain: attenuation.cone.outsideGain,
           }),
     });
-    this.#voices.set(request.voiceId, { entity, request, started: false, waitedMs: 0 });
+    this.#voices.set(request.voiceId, { entity, request, started: false });
+    this.#reaper.track(request.voiceId, request, () => this.#onStartTimeout(request.voiceId));
     AudioUtils.play(entity);
   }
 
@@ -133,6 +140,7 @@ export class IWSDKAudioPort implements AudioPort {
     const voice = this.#voices.get(voiceId);
     if (voice === undefined) return;
     this.#voices.delete(voiceId);
+    this.#reaper.release(voiceId);
     this.#retire(voice);
   }
 
@@ -143,31 +151,46 @@ export class IWSDKAudioPort implements AudioPort {
   }
 
   update(deltaMs: number): void {
-    if (this.#disposed || this.#voices.size === 0) return;
+    if (this.#disposed) return;
+    this.#reaper.update(deltaMs);
+    if (this.#voices.size === 0) return;
     for (const [id, voice] of [...this.#voices]) {
       // A looping voice ends when someone stops it, never on its own.
       if (voice.request.loop) continue;
       const playing = AudioUtils.isPlaying(voice.entity);
       if (playing) {
-        voice.started = true;
+        if (!voice.started) {
+          voice.started = true;
+          this.#reaper.confirmStarted(id);
+        }
         continue;
       }
-      if (!voice.started) {
-        voice.waitedMs += deltaMs;
-        if (voice.waitedMs < this.#startTimeoutMs) continue;
-        console.warn(
-          `[iwsdk-environment] cue "${voice.request.cue.id}" never started (${voice.request.cue.src})`,
-        );
-      }
+      // Never (yet) observed playing: still within its start window, or
+      // already handed to `#onStartTimeout` by the reaper above - either way
+      // there is nothing for THIS loop to do with it.
+      if (!voice.started) continue;
       this.#voices.delete(id);
       this.#retire(voice);
       voice.request.ended();
     }
   }
 
+  /** The shared reaper gave up on a voice that never started; see its file comment for the rule. */
+  #onStartTimeout(voiceId: number): void {
+    const voice = this.#voices.get(voiceId);
+    if (voice === undefined) return;
+    console.warn(
+      `[iwsdk-environment] cue "${voice.request.cue.id}" never started (${voice.request.cue.src})`,
+    );
+    this.#voices.delete(voiceId);
+    this.#retire(voice);
+    voice.request.ended();
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#reaper.clear();
     for (const [id, voice] of [...this.#voices]) {
       this.#voices.delete(id);
       this.#retire(voice);

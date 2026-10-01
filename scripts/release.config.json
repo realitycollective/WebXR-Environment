@@ -4,7 +4,8 @@
     "webxr-environment",
     "threejs-environment",
     "iwsdk-environment",
-    "xrblocks-environment"
+    "xrblocks-environment",
+    "native-environment"
   ],
   "importCheck": [
     "webxr-environment"

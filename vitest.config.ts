@@ -11,6 +11,7 @@ export default defineConfig({
       "@realitycollective/threejs-environment": pkg("threejs-environment"),
       "@realitycollective/iwsdk-environment": pkg("iwsdk-environment"),
       "@realitycollective/xrblocks-environment": pkg("xrblocks-environment"),
+      "@realitycollective/native-environment": pkg("native-environment"),
     },
   },
   test: {
@@ -36,6 +37,7 @@ export default defineConfig({
         "packages/threejs-environment/src/index.ts",
         "packages/iwsdk-environment/src/index.ts",
         "packages/xrblocks-environment/src/index.ts",
+        "packages/native-environment/src/index.ts",
       ],
       // Anti-regression ratchets, one per package, each at the floor that
       // package actually measures today. Per-package rather than one global
@@ -86,6 +88,15 @@ export default defineConfig({
         "packages/iwsdk-environment/src/**": {
           lines: 100,
           branches: 97,
+          functions: 100,
+          statements: 100,
+        },
+        // The native host adapter forwards or omits, and never decides, so
+        // every branch is a slice being present or absent - exactly what the
+        // in-memory fake host in test/helpers can drive both sides of.
+        "packages/native-environment/src/**": {
+          lines: 100,
+          branches: 100,
           functions: 100,
           statements: 100,
         },

@@ -302,7 +302,7 @@ export class IWSDKEnvironmentPort implements EnvironmentPort {
   }
 
   /**
-   * IWSDK 0.5.3 has no light estimation at all - no probe, no session hook,
+   * IWSDK has no light estimation at all (0.5.3 and 1.0.0) - no probe, no session hook,
    * nothing in its typings. This says so instead of leaving the app to wonder
    * why the room never lights anything, and the request is recorded in
    * docs/UPSTREAM_ENHANCEMENTS.md.
@@ -319,7 +319,7 @@ export class IWSDKEnvironmentPort implements EnvironmentPort {
     this.#report({
       feature: "lightEstimation",
       state: "unsupported",
-      detail: "IWSDK 0.5.3 does not expose WebXR light estimation",
+      detail: "IWSDK 1.0 does not expose WebXR light estimation",
     });
   }
 

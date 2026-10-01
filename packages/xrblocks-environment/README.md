@@ -37,6 +37,7 @@ director.update(deltaMs);
 - **Sky, fog, lights and image-based lighting** come from the three.js adapter it extends. XR Blocks renders through three.js, so reimplementing four slots would only let them drift.
 - **Depth occlusion** - registers as a client of XR Blocks' `Depth` manager (`resumeDepth` / `pauseDepth`), turns its occlusion pass on, and chooses the depth-texture blur from the requested mode and softness.
 - **Light estimation** - reads the `Lighting` manager, which already owns the WebXR half, and turns its directional light and ambient probe into the same specs an app writes by hand. The director then lays them over the ambient, key and ibl slots.
+- **Scenes** - `createXRBlocksScenes(root, options)` is the three.js `ThreeScenePort` under the core's `SceneManager`, as `createXRBlocksAudio` is the three.js audio port: XR Blocks renders through three.js and adds nothing a scene needs.
 - **The room** - `createXRBlocksWorldSensing(xb.core.world)` reads XR Blocks' `PlaneDetector` and `MeshDetector`. Anchors and hit testing report `unsupported`: XR Blocks has `placeOnSurface` and `anchorObjectAtReticle`, which move an object for you and hand nothing back, so neither can answer where a ray would land.
 
 ## Two things worth knowing
@@ -49,6 +50,6 @@ director.update(deltaMs);
 
 `three >= 0.170.0`, plus an XR Blocks build to hand in. `xrblocks` itself is **not** a dependency: the depth and lighting managers are described structurally, so nothing here pins a version of it. Verified against `xrblocks` 0.21.1.
 
-## Licence
+## License
 
-MIT.
+MIT - see [LICENSE](./LICENSE).

@@ -1,5 +1,6 @@
+import { resolveAudioSpatial } from "@realitycollective/webxr-environment";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Group, PositionalAudio, Scene, Vector3 } from "three";
+import { Audio, Group, PositionalAudio, Scene, Vector3 } from "three";
 import type { AudioCue, AudioVoiceRequest } from "@realitycollective/threejs-environment";
 import { ThreeAudioPort, createThreeAudio } from "@realitycollective/threejs-environment";
 import { createTestListener, fakeBuffer } from "./helpers.js";
@@ -126,6 +127,87 @@ describe("ThreeAudioPort", () => {
     await vi.waitFor(() => expect(held.ended).toHaveBeenCalledOnce());
   });
 
+  it("reaps a held voice whose buffer never arrives at all, and says so", () => {
+    // Distinct from the rejection above: here the loader's promise never
+    // settles either way - a hung fetch, not a failed one - so nothing but
+    // the shared start-timeout reaper ever ends this voice.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const listener = createTestListener().listener;
+    const scene = new Scene();
+    scene.add(listener);
+    const loader = { loadAsync: () => new Promise<AudioBuffer>(() => {}) };
+    const port = new ThreeAudioPort(listener, { loader, parent: scene, startTimeoutMs: 1000 });
+
+    const held = request();
+    port.start(held);
+    port.update(999);
+    expect(held.ended).not.toHaveBeenCalled();
+
+    port.update(1);
+    expect(held.ended).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("skips a held voice another one's ended callback already stopped, when its own timeout comes up in the same update()", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const listener = createTestListener().listener;
+    const scene = new Scene();
+    scene.add(listener);
+    const loader = { loadAsync: () => new Promise<AudioBuffer>(() => {}) };
+    const port = new ThreeAudioPort(listener, { loader, parent: scene, startTimeoutMs: 100 });
+
+    const second = request({ voiceId: 2 });
+    const first = request({
+      voiceId: 1,
+      ended: vi.fn(() => port.stop(2)),
+    });
+    port.start(first);
+    port.start(second);
+
+    expect(() => port.update(101)).not.toThrow();
+
+    expect(first.ended).toHaveBeenCalledOnce();
+    expect(second.ended).not.toHaveBeenCalled();
+    // Only voice 1's timeout actually ran the warn-and-end path; voice 2's
+    // was already gone from `#waiting` by the time its own timeout came up.
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("never reaps a voice once it has actually started, however long update() then runs", async () => {
+    const { port, loader, context } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    const voice = request();
+    port.start(voice);
+    port.update(1_000_000);
+    expect(voice.ended).not.toHaveBeenCalled();
+    expect(context.sources[0]?.stopped).toBeFalsy();
+  });
+
+  it("detaches a voice without calling its own stop() again, if play() itself never actually started it", async () => {
+    // `#voices` gets the entry before `audio.play()` runs, so a `play()` that
+    // throws - a real possibility on the real Web Audio API - leaves a voice
+    // registered whose `Audio.isPlaying` never became true. `#release` must
+    // still clean it up without calling `stop()` on an audio object that was
+    // never actually playing.
+    const { port, loader } = setup();
+    const ready = port.load(CLICK);
+    loader.resolveAll();
+    await ready;
+
+    const playSpy = vi.spyOn(Audio.prototype, "play").mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    expect(() => port.start(request({ voiceId: 9 }))).toThrow("boom");
+    playSpy.mockRestore();
+
+    const stopSpy = vi.spyOn(Audio.prototype, "stop");
+    expect(() => port.stop(9)).not.toThrow();
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
   it("reports the voice ended when three.js says playback finished", async () => {
     const { port, loader, context } = setup();
     const ready = port.load(CLICK);
@@ -179,7 +261,7 @@ describe("ThreeAudioPort", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+        spatial: resolveAudioSpatial({ refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" }),
       }),
     );
     const holder = scene.children.find((child) => child.name.startsWith("webxr-environment:voice"));
@@ -200,7 +282,7 @@ describe("ThreeAudioPort", () => {
       request({
         at: [0, 0, 0],
         // A quarter-turn cone facing straight down.
-        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        spatial: resolveAudioSpatial({ cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } }),
         facing: [0, -1, 0],
       }),
     );

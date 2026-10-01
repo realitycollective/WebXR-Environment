@@ -9,19 +9,20 @@
  * so an app on XR Blocks installs this package and nothing else.
  */
 import type { Scene } from "three";
-import type { ThreeEnvironmentPortOptions } from "@realitycollective/threejs-environment";
+import type { ThreeEnvironmentPortOptions, ThreeScenePortOptions } from "@realitycollective/threejs-environment";
 import type {
   AudioDirectorOptions,
   EnvironmentDirectorOptions,
 } from "@realitycollective/webxr-environment";
-import type { WorldSensingDirectorOptions } from "@realitycollective/webxr-environment";
+import type { SceneManagerOptions, WorldSensingDirectorOptions } from "@realitycollective/webxr-environment";
 import {
   AudioDirector,
   EnvironmentDirector,
+  SceneManager,
   WorldSensingDirector,
 } from "@realitycollective/webxr-environment";
-import { ThreeAudioPort, type ThreeAudioPortOptions } from "@realitycollective/threejs-environment";
-import type { AudioListener } from "three";
+import { ThreeAudioPort, ThreeScenePort, type ThreeAudioPortOptions } from "@realitycollective/threejs-environment";
+import type { AudioListener, Group, Object3D } from "three";
 import { XRBlocksEnvironmentPort } from "./environment-port.js";
 import { XRBlocksWorldSensingPort } from "./world-sensing-port.js";
 import type { XRBlocksEnvironmentContext, XBWorldLike } from "./xrblocks.js";
@@ -128,4 +129,23 @@ export function createXRBlocksAudio(
 ): XRBlocksAudioSetup {
   const port = new ThreeAudioPort(listener, options);
   return { director: new AudioDirector(port, options), port };
+}
+
+export interface XRBlocksScenesSetup {
+  readonly manager: SceneManager<Group, Object3D>;
+  readonly port: ThreeScenePort;
+}
+
+/**
+ * Wire a scene manager to XR Blocks' three.js scene (`xb.core.scene`). XR
+ * Blocks renders through three.js and adds nothing a scene needs, so this is
+ * `ThreeScenePort` outright, the same way `createXRBlocksAudio` is
+ * `ThreeAudioPort`.
+ */
+export function createXRBlocksScenes(
+  root: Object3D,
+  options: SceneManagerOptions & ThreeScenePortOptions = {},
+): XRBlocksScenesSetup {
+  const port = new ThreeScenePort(root, options);
+  return { manager: new SceneManager(port, options), port };
 }

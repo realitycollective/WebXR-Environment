@@ -14,13 +14,20 @@
 #
 # Deploy:
 #   - production -> ONLY on push to `main` or a manual dispatch from `main`.
-#   - staging    -> ONLY on pull_request, into isolated `-test` projects.
+#   - staging    -> on pull_request and on pushes to development, into the
+#                   isolated `-test` project, always as its `staging` branch
+#                   so the project's root URL serves the latest build.
 #     A PR can never touch production.
 #
 # The deploy steps need the Cloudflare secrets and skip automatically when they
 # are absent, which leaves this workflow as a pure build gate.
 #   - CLOUDFLARE_API_TOKEN   (token with "Cloudflare Pages: Edit")
 #   - CLOUDFLARE_ACCOUNT_ID
+
+# Dry run:
+#   - after a pull request merges into `main` or `development` and every job
+#     above passes on the merge, queue-dry-run dispatches "Publish to npm"
+#     on that branch with dryRun ticked. A direct push queues nothing.
 
 name: CI
 
@@ -57,6 +64,14 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      # Reads only the manifests, the lockfile and npm, so it runs before the install. Into main,
+      # every dependency on another Reality Collective repository names npm's latest release;
+      # into any other branch, the newest version on npm (scripts/rc-dependencies.mjs).
+      - name: Check Reality Collective dependencies
+        env:
+          INTO: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+        run: node scripts/rc-dependencies.mjs --into "$INTO"
+
       - name: Install dependencies
         run: npm ci
 
@@ -75,6 +90,11 @@ jobs:
       # builds green but ships broken.
       - name: Verify the published artifact is consumable
         run: npm run verify:pack -- --skip-build
+
+      # Compile only. The native harness runs on a developer's machine or a headset, never here:
+      # CI checks that it typechecks, bundles through the gates and compiles to Hermes bytecode.
+      - name: Compile the native harness (no run)
+        run: npm run harness:compile -- --require-hermes
 
       - name: Build playground (static Vite bundle)
         run: npm run build:playground
@@ -198,11 +218,15 @@ jobs:
             --mount "#scene-container"
 
   # ---------------------------------------------------------------------------
-  # STAGING - pull_request only. Publishes to the ISOLATED test project.
+  # STAGING - pull requests and pushes to development. Publishes to the
+  # ISOLATED test project, always as its production branch (`staging`), so the
+  # root URL (webxr-environment-test.pages.dev) serves the newest build. A
+  # per-PR branch name would only ever create pr-<n>.<project>.pages.dev
+  # aliases and leave the root a 404, which is what happened before.
   # ---------------------------------------------------------------------------
   deploy-staging:
     needs: build-test
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -256,7 +280,7 @@ jobs:
           command: >-
             pages deploy dist
             --project-name=webxr-environment-test
-            --branch=pr-${{ github.event.pull_request.number }}
+            --branch=staging
             --commit-dirty=true
 
       - name: Publish the staging URL
@@ -267,7 +291,7 @@ jobs:
           set -uo pipefail
           qrenc="$(jq -rn --arg u "$DEPLOY_URL" '$u|@uri')"
           {
-            echo "## Environment playground (STAGING - this PR only)"
+            echo "## Environment playground (STAGING - latest build)"
             echo ""
             echo "| | |"
             echo "| --- | --- |"
@@ -302,3 +326,48 @@ jobs:
             "${{ steps.deploy.outputs.deployment-url }}" \
             --mount "#scene-container"
 
+  # ---------------------------------------------------------------------------
+  # DRY RUN - after a merged pull request, queue "Publish to npm" with dryRun
+  # ticked on the branch it merged into. It waits for every job above and runs
+  # only when none failed. A direct push to the branch queues nothing, because
+  # releases are cut from pull requests. The publish run itself is still
+  # dispatched by hand when it is for real.
+  # ---------------------------------------------------------------------------
+  queue-dry-run:
+    name: Queue publish dry run
+    needs: [build-test, deploy-production, deploy-staging]
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && github.event_name == 'push'
+      && (github.ref_name == 'main' || github.ref_name == 'development')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      # GITHUB_TOKEN cannot trigger most workflows, but workflow_dispatch is
+      # the documented exception, so no extra secret is needed.
+      - name: Dispatch the dry run if this push merged a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PR="$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"$BRANCH\")][0].number // empty")"
+          if [ -z "$PR" ]; then
+            echo "$SHA on $BRANCH is not a merged pull request. No dry run queued."
+            exit 0
+          fi
+          gh workflow run publish-npm.yml --repo "$REPO" --ref "$BRANCH" -f dryRun=true
+          {
+            echo "## Publish dry run queued"
+            echo ""
+            echo "PR #$PR merged into \`$BRANCH\`, so a dry run of **Publish to npm** was dispatched on \`$BRANCH\`."
+            echo "Find it in [Publish to npm](https://github.com/$REPO/actions/workflows/publish-npm.yml?query=branch%3A$BRANCH)."
+          } >> "$GITHUB_STEP_SUMMARY"

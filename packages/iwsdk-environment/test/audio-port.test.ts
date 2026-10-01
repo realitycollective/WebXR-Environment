@@ -1,3 +1,4 @@
+import { AUDIO_ATTENUATION_DEFAULTS, resolveAudioSpatial } from "@realitycollective/webxr-environment";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AudioSource,
@@ -164,6 +165,50 @@ describe("IWSDKAudioPort", () => {
     expect(world.created[0]?.destroyed).toBe(true);
   });
 
+  it("does not re-confirm a voice already known to be playing, on a later update()", () => {
+    const audio = stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world));
+
+    const voice = request();
+    port.start(voice);
+    const entity = world.created[0]!;
+    audio.playing.add(entity.id);
+
+    port.update(16);
+    // Still playing on a second tick: `voice.started` is already true, so
+    // this must skip the confirm branch entirely rather than re-run it.
+    port.update(16);
+
+    expect(voice.ended).not.toHaveBeenCalled();
+    expect(entity.destroyed).toBe(false);
+  });
+
+  it("skips a voice another one's ended callback already stopped, when its own timeout comes up in the same update()", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const audio = stubAudioUtils();
+    const world = createFakeWorld();
+    const port = new IWSDKAudioPort(asWorld(world), { startTimeoutMs: 100 });
+
+    const second = request({ voiceId: 2 });
+    const first = request({
+      voiceId: 1,
+      ended: vi.fn(() => port.stop(2)),
+    });
+    port.start(first);
+    port.start(second);
+
+    expect(() => port.update(101)).not.toThrow();
+
+    expect(first.ended).toHaveBeenCalledOnce();
+    expect(second.ended).not.toHaveBeenCalled();
+    // Only voice 1's timeout actually ran the warn-and-retire path; voice 2's
+    // was already gone from `#voices` by the time its own timeout came up -
+    // it was still retired, just via the reentrant `port.stop(2)` above, once.
+    expect(warn).toHaveBeenCalledOnce();
+    expect(audio.stopped).toEqual([world.created[0]!.id, world.created[1]!.id]);
+  });
+
   it("stops a voice on request, and ignores a stale id", () => {
     const audio = stubAudioUtils();
     const world = createFakeWorld();
@@ -212,7 +257,7 @@ describe("IWSDKAudioPort", () => {
 });
 
 describe("spatial attenuation", () => {
-  it("writes the cue's fall-off onto the AudioSource, and nothing it did not name", () => {
+  it("writes the cue's fall-off onto the AudioSource, every field resolved from the core defaults", () => {
     stubAudioUtils();
     const world = createFakeWorld();
     const port = new IWSDKAudioPort(asWorld(world));
@@ -220,7 +265,7 @@ describe("spatial attenuation", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" },
+        spatial: resolveAudioSpatial({ refDistance: 4, rolloffFactor: 2, maxDistance: 30, model: "linear" }),
       }),
     );
     const withSpatial = world.created.at(-1);
@@ -229,13 +274,20 @@ describe("spatial attenuation", () => {
     expect(withSpatial?.components.get(AudioSource)?.["maxDistance"]).toBe(30);
     expect(withSpatial?.components.get(AudioSource)?.["distanceModel"]).toBe("linear");
 
-    port.start(request({ voiceId: 2, at: [0, 0, 0], spatial: { model: "exponential" } }));
+    port.start(request({ voiceId: 2, at: [0, 0, 0], spatial: resolveAudioSpatial({ model: "exponential" }) }));
     const sparse = world.created.at(-1);
     expect(sparse?.components.get(AudioSource)?.["distanceModel"]).toBe("exponential");
-    expect(sparse?.components.get(AudioSource)).not.toHaveProperty("refDistance");
+    // A field the cue did not name is the core default, never IWSDK's own.
+    expect(sparse?.components.get(AudioSource)?.["refDistance"]).toBe(AUDIO_ATTENUATION_DEFAULTS.refDistance);
+    expect(sparse?.components.get(AudioSource)?.["maxDistance"]).toBe(AUDIO_ATTENUATION_DEFAULTS.maxDistance);
+    expect(sparse?.components.get(AudioSource)?.["coneInnerAngle"]).toBe(360);
+    expect(sparse?.components.get(AudioSource)?.["coneOuterGain"]).toBe(0);
 
-    port.start(request({ voiceId: 3, at: [0, 0, 0], spatial: { model: "inverse" } }));
+    port.start(request({ voiceId: 3, at: [0, 0, 0], spatial: resolveAudioSpatial({ model: "inverse" }) }));
     expect(world.created.at(-1)?.components.get(AudioSource)?.["distanceModel"]).toBe("inverse");
+    // A request built by hand with no attenuation still gets the core defaults.
+    port.start(request({ voiceId: 4, at: [0, 0, 0], spatial: null }));
+    expect(world.created.at(-1)?.components.get(AudioSource)?.["refDistance"]).toBe(1);
   });
 
   it("writes a cone in degrees and turns the entity to face where it points", () => {
@@ -246,7 +298,7 @@ describe("spatial attenuation", () => {
     port.start(
       request({
         at: [0, 0, 0],
-        spatial: { cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } },
+        spatial: resolveAudioSpatial({ cone: { inner: Math.PI / 2, outer: Math.PI, outsideGain: 0.25 } }),
         facing: [0, 0, -1],
       }),
     );
