@@ -4,6 +4,12 @@ Change log for the Reality Collective WebXR Environment Extensions packages. All
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Preview builds are not listed separately. The entry for a version accumulates while its previews are published, and is dated when that version is released.
 
+## [0.1.2]
+
+### Changed
+
+- Development, tests and the playground run on `@iwsdk/core` 1.0.1, which changes no runtime code from 1.0.0. `three` stays on `super-three` 0.185.0, now the version every WebXR repository uses. Published peer ranges are unchanged.
+
 ## [0.1.1] - 2026-10-01
 
 ### Added

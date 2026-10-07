@@ -46,7 +46,7 @@
     "three": ">=0.170.0"
   },
   "devDependencies": {
-    "@iwsdk/core": "1.0.0",
+    "@iwsdk/core": "1.0.1",
     "three": "npm:super-three@0.185.0",
     "@types/three": "0.185.4"
   },
