@@ -164,10 +164,30 @@ jobs:
       # Reads only the manifests, the lockfile and npm, so it runs before the install. From main
       # every dependency on another Reality Collective repository names npm's latest release;
       # from development, the newest version on npm (scripts/rc-dependencies.mjs).
+      #
+      # From development the step also MOVES them. A newer version of another repository on npm
+      # is pinned, the lockfile is regenerated, and the rest of this run installs, builds, tests
+      # and publishes against it. The move is committed here and leaves with the preview bump's
+      # push, so a preview never publishes behind the repositories it depends on. From main the
+      # step only checks: release.mjs has already moved every pin to the latest release, and a
+      # release that appears after that is a decision for a person, not this job.
       - name: Check Reality Collective dependencies
         env:
           INTO: ${{ github.ref_name }}
-        run: node scripts/rc-dependencies.mjs --into "$INTO"
+        run: |
+          set -euo pipefail
+          if [ "$INTO" = "development" ]; then
+            node scripts/rc-dependencies.mjs --into "$INTO" --fix
+            git add -- ':(glob)**/package.json' ':(glob)**/package-lock.json'
+            if git diff --cached --quiet; then
+              echo "Every dependency on another Reality Collective repository already names the newest version on npm"
+            else
+              git commit -m "chore(deps): move Reality Collective dependencies to the newest versions on npm [skip ci]"
+              echo "Moved. The commit leaves with the preview bump's push."
+            fi
+          else
+            node scripts/rc-dependencies.mjs --into "$INTO"
+          fi
 
       - name: Install dependencies
         run: npm ci

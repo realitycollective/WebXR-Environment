@@ -8,7 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The "Publish to npm" workflow moves dependencies on other Reality Collective repositories before it packs. From `development` the dependency check runs `scripts/rc-dependencies.mjs --fix`: a newer version of another repository on npm, release or preview, is pinned, the lockfile is regenerated, the run installs, builds, tests and publishes against it, and the move is committed and pushed with the preview bump. Before, the check only failed the run and the move was a pull request by hand. From `main` the step still only checks, because `release.mjs prepare` has already moved every pin to the latest release.
 - Development, tests and the playground run on `@iwsdk/core` 1.0.1, which changes no runtime code from 1.0.0. `three` stays on `super-three` 0.185.0, now the version every WebXR repository uses. Published peer ranges are unchanged.
+- The playground is a Service Framework app. The `WebXRRuntimeAdapter` from `@realitycollective/service-framework-three` 1.0.3-preview.1 owns its loop in place of the page's `Clock`. One app service, `EnvironmentAppService`, ticks the environment, world-sensing and audio directors from its `render()` and logs the adapter's capabilities and session state. No package changes.
 
 ## [0.1.1] - 2026-10-01
 
