@@ -9,6 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@realitycollective/service-framework": "1.0.3-preview.0",
+    "@realitycollective/service-framework-three": "1.0.3-preview.0",
     "@realitycollective/threejs-environment": "*",
     "three": "npm:super-three@0.185.0"
   },

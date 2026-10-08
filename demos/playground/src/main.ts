@@ -33,7 +33,6 @@
  */
 import {
   BoxGeometry,
-  Clock,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
@@ -45,6 +44,17 @@ import {
 import { AudioListener } from "three";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import {
+  createServiceProfile,
+  ManualScheduler,
+  ServiceManager,
+  type ServiceRegistration,
+} from "@realitycollective/service-framework";
+import {
+  WebXRRuntimeAdapter,
+  type WebXRManagerLike,
+  type WebXRSystemLike,
+} from "@realitycollective/service-framework-three";
+import {
   createThreeAudio,
   createThreeEnvironment,
   createThreeWorldSensing,
@@ -54,6 +64,7 @@ import {
   STOCK_PRESETS,
   WORLD_FEATURES,
 } from "@realitycollective/threejs-environment";
+import { ENVIRONMENT_APP_TOKEN, EnvironmentAppService, type EnvironmentAppConfig } from "./app-service.js";
 
 const container = document.getElementById("scene-container") as HTMLDivElement;
 
@@ -214,15 +225,62 @@ director.onChange((applied, requested) => {
 });
 
 // --- the loop ---------------------------------------------------------------
-// The directors do not tick themselves; this is the whole of the wiring.
-const clock = new Clock();
-renderer.setAnimationLoop(() => {
-  const deltaMs = clock.getDelta() * 1000;
-  director.update(deltaMs);
-  world.update(deltaMs);
-  audio.update(deltaMs);
-  knot.rotation.y += deltaMs * 0.0004;
-  renderer.render(scene, camera);
+// The directors do not tick themselves, and the page does not own the loop
+// either. The Service Framework's three.js adapter owns `setAnimationLoop`
+// and emits `renderTick`; the app service's `render()` hands each frame to the
+// closure below, which is the whole of the wiring. The adapter also gates
+// frames on a live session's visibility and raises focus and pause for it.
+const scheduler = new ManualScheduler();
+const manager = new ServiceManager({ scheduler });
+// The two casts are type-only. The adapter's session type declares
+// `enabledFeatures?: readonly string[]` without `| undefined`. Under this
+// repository's `exactOptionalPropertyTypes`, three.js's `WebXRManager` and
+// `navigator.xr` (typed by @types/webxr) therefore do not match it, although
+// both are the objects the adapter is built for.
+const adapter = new WebXRRuntimeAdapter({
+  xr: renderer.xr as unknown as WebXRManagerLike,
+  xrSystem: (navigator.xr ?? null) as WebXRSystemLike | null,
+  host: renderer,
+  scheduler,
+  manager,
+  // The features three.js's VRButton asks for, so a session opened through
+  // `adapter.session` matches the one the button opens.
+  sessionInit: () => ({ optionalFeatures: ["local-floor", "bounded-floor", "layers"] }),
+});
+
+const appConfig: EnvironmentAppConfig = {
+  adapter,
+  frame: (deltaSeconds) => {
+    // This family counts in milliseconds.
+    const deltaMs = deltaSeconds * 1000;
+    director.update(deltaMs);
+    world.update(deltaMs);
+    audio.update(deltaMs);
+    knot.rotation.y += deltaMs * 0.0004;
+    renderer.render(scene, camera);
+  },
+  report: (line) => console.info("[environment]", line),
+};
+// Typed first, so the config is checked against the class it configures, then
+// widened: a profile holds registrations of any config type, and a class that
+// takes a specific config is not assignable to one that takes `unknown`.
+const appRegistration: ServiceRegistration<EnvironmentAppService, EnvironmentAppConfig> = {
+  token: ENVIRONMENT_APP_TOKEN,
+  config: appConfig,
+  useClass: EnvironmentAppService,
+};
+manager.initializeProfile(
+  createServiceProfile("environment-playground", [appRegistration as unknown as ServiceRegistration]),
+);
+manager.start();
+adapter.start();
+
+// A desktop page has no session to follow, so the browser's own visibility is
+// what tells every service it lost or regained focus.
+document.addEventListener("visibilitychange", () => {
+  const focused = document.visibilityState === "visible";
+  manager.emitFocusChange(focused);
+  manager.emitPauseChange({ paused: !focused });
 });
 
 window.addEventListener("resize", () => {
